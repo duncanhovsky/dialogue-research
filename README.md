@@ -11,6 +11,8 @@
 - 读取可用 Copilot 大模型列表，展示各模型收费说明，并支持按话题选择模型
 - 回复模式切换：`manual` / `auto`
 - Telegram `/start` 欢迎语（含技能介绍与 GitHub 仓库地址）
+- 支持用户上传 PDF 论文：本地缓存、阅读分析、分类入库、重命名保存
+- 支持围绕当前论文问答：`/paper` 查看当前论文，`/ask` 发起问题
 - MCP 工具化接口，便于在 Copilot Chat 中编排
 
 ## 项目结构
@@ -42,10 +44,9 @@ npm install
 npm run build
 ```
 
-3. 配置环境变量（任选）
+3. 配置环境变量（推荐）
 
-- 方式 A：使用 `.vscode/mcp.json` 启动时弹窗输入 token
-- 方式 B：复制 `.env.example` 为 `.env` 并注入环境（你自己的运行方式）
+- 复制 `.env.example` 为 `.env` 并注入环境（或直接配置系统环境变量）
 
 4. 重载 VS Code 窗口，确保 MCP server 已连接
 
@@ -115,6 +116,8 @@ npm run daemon:start
 - `REPLY_MODE`：`manual`（默认）或 `auto`
 - `SESSION_RETENTION_MESSAGES`：每条线程保留消息上限（默认 200）
 - `SESSION_RETENTION_DAYS`：保留天数（默认 30）
+- `PAPER_CACHE_DIR`：PDF 缓存目录（默认 `./data/papers/cache`）
+- `PAPER_DB_DIR`：论文入库目录（默认 `./data/papers/library`）
 - `DEFAULT_TOPIC`：默认话题（默认 `default`）
 - `DEFAULT_AGENT`：默认智能体标识（默认 `default`）
 - `DEFAULT_MODEL`：默认模型 ID（默认 `gpt-5.3-codex`）
@@ -133,6 +136,9 @@ npm run daemon:start
 - `/models`：显示可用模型及收费说明
 - `/model <id>`：为当前 `chat_id + topic` 选择模型
 - `/start`：显示欢迎语、功能说明和 GitHub 仓库地址
+- 直接发送 PDF：自动阅读分析并入库
+- `/paper`：查看当前话题激活论文信息
+- `/ask <问题>`：基于当前论文进行问答
 
 ## MCP 工具接口
 
@@ -169,6 +175,7 @@ npm run daemon:start
 - 持续监听：使用 `start:daemon` 长轮询 Telegram，等待过程不调用 Copilot 模型。
 - 可选开机自启：使用 `daemon:autostart` 注册计划任务，`daemon:stop` 一键停止并禁用。
 - 低消耗命令本地处理：`/start`、`/models`、`/model`、`/topic`、`/agent`、`/history`。
+- PDF 处理链路本地执行：接收 PDF、提取文本、分类和检索问答默认不消耗 Copilot Token。
 - 按需调用 Copilot：仅当你在 VS Code Copilot Chat 中执行 `/telegram-copilot-bridge` 时才会消耗 Copilot Token。
 - 推荐生产策略：默认守护进程待机 + 人工触发 Copilot 回复，避免无效模型调用。
 

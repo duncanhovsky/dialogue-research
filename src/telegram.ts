@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Dispatcher, ProxyAgent, fetch as undiciFetch } from 'undici';
-import { AppConfig, TelegramUpdate } from './types.js';
+import { AppConfig, TelegramFileInfo, TelegramUpdate } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -15,6 +15,16 @@ const sendSchema = z.object({
   ok: z.boolean(),
   result: z.object({
     message_id: z.number()
+  })
+});
+
+const getFileSchema = z.object({
+  ok: z.boolean(),
+  result: z.object({
+    file_id: z.string(),
+    file_unique_id: z.string(),
+    file_size: z.number().optional(),
+    file_path: z.string().optional()
   })
 });
 
@@ -69,6 +79,35 @@ export class TelegramClient {
     return parsed.result.message_id;
   }
 
+  async getFile(fileId: string): Promise<TelegramFileInfo> {
+    const json = await this.postWithFallback('getFile', { file_id: fileId });
+    const parsed = getFileSchema.parse(json);
+    if (!parsed.ok) {
+      throw new Error('Telegram getFile returned ok=false');
+    }
+
+    return parsed.result;
+  }
+
+  async downloadFile(filePath: string): Promise<Buffer> {
+    const url = `${this.config.telegramApiBase}/file/bot${this.config.telegramBotToken}/${filePath}`;
+
+    try {
+      const response = await undiciFetch(url, {
+        method: 'GET',
+        dispatcher: this.shouldBypassProxy(url) ? undefined : this.proxyDispatcher
+      });
+      if (!response.ok) {
+        throw new Error(`Download failed: ${response.status}`);
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    } catch {
+      return this.downloadViaPowerShell(url);
+    }
+  }
+
   private async postWithFallback(method: string, payload: Record<string, unknown>): Promise<unknown> {
     const url = this.endpoint(method);
 
@@ -91,13 +130,14 @@ export class TelegramClient {
   }
 
   private async postViaPowerShell(url: string, payload: Record<string, unknown>): Promise<unknown> {
-    const body = JSON.stringify(payload).replace(/'/g, "''");
+    const bodyBase64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
     const escapedUrl = url.replace(/'/g, "''");
     const script = [
       "$ErrorActionPreference = 'Stop'",
       `$url = '${escapedUrl}'`,
-      `$body = '${body}'`,
-      "$resp = Invoke-RestMethod -Uri $url -Method Post -ContentType 'application/json' -Body $body",
+      `$bodyBase64 = '${bodyBase64}'`,
+      '$body = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($bodyBase64))',
+      "$resp = Invoke-RestMethod -Uri $url -Method Post -ContentType 'application/json; charset=utf-8' -Body $body",
       "$resp | ConvertTo-Json -Depth 20 -Compress"
     ].join('; ');
 
@@ -107,6 +147,26 @@ export class TelegramClient {
     });
 
     return JSON.parse(stdout.trim());
+  }
+
+  private async downloadViaPowerShell(url: string): Promise<Buffer> {
+    const escapedUrl = url.replace(/'/g, "''");
+    const script = [
+      "$ErrorActionPreference = 'Stop'",
+      `$url = '${escapedUrl}'`,
+      '$tmp = [System.IO.Path]::GetTempFileName()',
+      'Invoke-WebRequest -Uri $url -OutFile $tmp',
+      '$bytes = [System.IO.File]::ReadAllBytes($tmp)',
+      'Remove-Item $tmp -Force',
+      '[System.Convert]::ToBase64String($bytes)'
+    ].join('; ');
+
+    const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', script], {
+      windowsHide: true,
+      maxBuffer: 20 * 1024 * 1024
+    });
+
+    return Buffer.from(stdout.trim(), 'base64');
   }
 
   private selectProxyForProtocol(protocol: string): string | undefined {

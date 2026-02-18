@@ -26,6 +26,9 @@ Do not commit real token values into repository files.
 - `/models`: show available Copilot models and pricing notes.
 - `/model <id>`: select model for current topic.
 - `/start`: show welcome message and repository link.
+- `发送 PDF 文件`: trigger local paper reading and storage workflow.
+- `/paper`: show active paper info in current topic.
+- `/ask <question>`: ask questions about the active paper.
 
 ## Required MCP tools
 

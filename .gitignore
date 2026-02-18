@@ -5,3 +5,4 @@ coverage/
 data/*.sqlite
 data/*.sqlite-*
 data/*.db
+data/papers/**

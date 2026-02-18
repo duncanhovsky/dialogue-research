@@ -6,6 +6,8 @@ export interface AppConfig {
   httpProxy?: string;
   httpsProxy?: string;
   noProxy?: string;
+  paperCacheDir: string;
+  paperDbDir: string;
   replyMode: ReplyMode;
   pollTimeoutSeconds: number;
   pollIntervalMs: number;
@@ -33,6 +35,7 @@ export interface TelegramUpdate {
     message_id: number;
     date: number;
     text?: string;
+    caption?: string;
     chat: {
       id: number;
       type: string;
@@ -47,7 +50,21 @@ export interface TelegramUpdate {
       first_name: string;
       username?: string;
     };
+    document?: {
+      file_id: string;
+      file_unique_id: string;
+      file_name?: string;
+      mime_type?: string;
+      file_size?: number;
+    };
   };
+}
+
+export interface TelegramFileInfo {
+  file_id: string;
+  file_unique_id: string;
+  file_size?: number;
+  file_path?: string;
 }
 
 export interface SessionMessage {

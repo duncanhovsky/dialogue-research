@@ -8,6 +8,8 @@ const config: AppConfig = {
   replyMode: 'manual',
   pollTimeoutSeconds: 20,
   pollIntervalMs: 1200,
+  paperCacheDir: './data/papers/cache',
+  paperDbDir: './data/papers/library',
   sessionRetentionDays: 30,
   sessionRetentionMessages: 200,
   dbPath: ':memory:',
@@ -54,6 +56,17 @@ describe('parseTelegramText', () => {
     expect(result.command).toBe('start');
     expect(result.text).toContain('Telegram ↔ VS Code Copilot Bridge Skill');
     expect(result.text).toContain('https://github.com/duncanhovsky/telegram-copilot-bridge-skill');
+  });
+
+  it('parses ask command', () => {
+    const result = parseTelegramText('/ask 这篇论文的主要贡献是什么', config);
+    expect(result.command).toBe('ask');
+    expect(result.question).toContain('主要贡献');
+  });
+
+  it('parses paper command', () => {
+    const result = parseTelegramText('/paper', config);
+    expect(result.command).toBe('paper');
   });
 
   it('returns plain text payload', () => {

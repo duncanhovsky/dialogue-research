@@ -40,6 +40,8 @@ export function loadConfig(): AppConfig {
     sessionRetentionDays: asNumber('SESSION_RETENTION_DAYS', 30),
     sessionRetentionMessages: asNumber('SESSION_RETENTION_MESSAGES', 200),
     dbPath: process.env.DB_PATH ?? './data/sessions.sqlite',
+    paperCacheDir: process.env.PAPER_CACHE_DIR ?? './data/papers/cache',
+    paperDbDir: process.env.PAPER_DB_DIR ?? './data/papers/library',
     defaultTopic: process.env.DEFAULT_TOPIC ?? 'default',
     defaultAgent: process.env.DEFAULT_AGENT ?? 'default',
     defaultModel: process.env.DEFAULT_MODEL ?? 'gpt-5.3-codex',

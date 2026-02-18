@@ -176,14 +176,23 @@ export class SessionStore {
   }
 
   getSelectedModel(chatId: number, topic: string): string {
-    const row = this.db
-      .prepare('SELECT value FROM bridge_state WHERE key = ? LIMIT 1')
-      .get(this.makeTopicKey(chatId, topic, 'selected_model')) as { value: string } | undefined;
-
-    return row?.value ?? this.config.defaultModel;
+    return this.getTopicState(chatId, topic, 'selected_model') ?? this.config.defaultModel;
   }
 
   setSelectedModel(chatId: number, topic: string, modelId: string): string {
+    this.setTopicState(chatId, topic, 'selected_model', modelId);
+    return modelId;
+  }
+
+  getTopicState(chatId: number, topic: string, key: string): string | undefined {
+    const row = this.db
+      .prepare('SELECT value FROM bridge_state WHERE key = ? LIMIT 1')
+      .get(this.makeTopicKey(chatId, topic, key)) as { value: string } | undefined;
+
+    return row?.value;
+  }
+
+  setTopicState(chatId: number, topic: string, key: string, value: string): string {
     const now = Date.now();
     this.db
       .prepare(`
@@ -192,9 +201,9 @@ export class SessionStore {
         ON CONFLICT(key)
         DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
       `)
-      .run(this.makeTopicKey(chatId, topic, 'selected_model'), modelId, now);
+      .run(this.makeTopicKey(chatId, topic, key), value, now);
 
-    return modelId;
+    return value;
   }
 
   private summarize(messages: SessionMessage[]): string {

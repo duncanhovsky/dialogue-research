@@ -13,6 +13,8 @@ function makeStore(): SessionStore {
     replyMode: 'manual',
     pollTimeoutSeconds: 20,
     pollIntervalMs: 1200,
+    paperCacheDir: './data/papers/cache',
+    paperDbDir: './data/papers/library',
     sessionRetentionDays: 30,
     sessionRetentionMessages: 200,
     dbPath: path.join(os.tmpdir(), `telegram-copilot-test-${Date.now()}-${Math.random()}.sqlite`),
