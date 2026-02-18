@@ -18,6 +18,9 @@
         "DEFAULT_MODEL": "gpt-5.3-codex",
         "MODEL_CATALOG_PATH": "./config/models.catalog.json",
         "GITHUB_REPO_URL": "https://github.com/duncanhovsky/telegram-copilot-bridge-skill"
+          "HTTP_PROXY": "${env:HTTP_PROXY}",
+          "HTTPS_PROXY": "${env:HTTPS_PROXY}",
+          "NO_PROXY": "${env:NO_PROXY}",
       }
     }
   },

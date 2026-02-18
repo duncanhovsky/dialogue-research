@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { Dispatcher, ProxyAgent, fetch as undiciFetch } from 'undici';
 import { AppConfig, TelegramUpdate } from './types.js';
 
 const execFileAsync = promisify(execFile);
@@ -18,7 +19,20 @@ const sendSchema = z.object({
 });
 
 export class TelegramClient {
-  constructor(private readonly config: AppConfig) {}
+  private readonly proxyDispatcher: Dispatcher | undefined;
+
+  private readonly noProxyList: string[];
+
+  constructor(private readonly config: AppConfig) {
+    const protocol = new URL(config.telegramApiBase).protocol;
+    this.noProxyList = (config.noProxy ?? '')
+      .split(',')
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+
+    const proxy = this.selectProxyForProtocol(protocol);
+    this.proxyDispatcher = proxy ? new ProxyAgent(proxy) : undefined;
+  }
 
   private endpoint(method: string): string {
     return `${this.config.telegramApiBase}/bot${this.config.telegramBotToken}/${method}`;
@@ -59,10 +73,11 @@ export class TelegramClient {
     const url = this.endpoint(method);
 
     try {
-      const response = await fetch(url, {
+      const response = await undiciFetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        dispatcher: this.shouldBypassProxy(url) ? undefined : this.proxyDispatcher
       });
 
       if (!response.ok) {
@@ -92,5 +107,29 @@ export class TelegramClient {
     });
 
     return JSON.parse(stdout.trim());
+  }
+
+  private selectProxyForProtocol(protocol: string): string | undefined {
+    if (protocol === 'https:') {
+      return this.config.httpsProxy ?? this.config.httpProxy;
+    }
+    return this.config.httpProxy;
+  }
+
+  private shouldBypassProxy(url: string): boolean {
+    if (this.noProxyList.length === 0) {
+      return false;
+    }
+
+    const hostname = new URL(url).hostname.toLowerCase();
+    return this.noProxyList.some((rule) => {
+      if (rule === '*') {
+        return true;
+      }
+      if (rule.startsWith('.')) {
+        return hostname.endsWith(rule) || hostname === rule.slice(1);
+      }
+      return hostname === rule || hostname.endsWith(`.${rule}`);
+    });
   }
 }

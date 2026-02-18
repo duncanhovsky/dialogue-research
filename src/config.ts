@@ -31,6 +31,9 @@ export function loadConfig(): AppConfig {
   return {
     telegramBotToken,
     telegramApiBase: process.env.TELEGRAM_API_BASE ?? 'https://api.telegram.org',
+    httpProxy: process.env.HTTP_PROXY,
+    httpsProxy: process.env.HTTPS_PROXY,
+    noProxy: process.env.NO_PROXY,
     replyMode: asMode(process.env.REPLY_MODE),
     pollTimeoutSeconds: asNumber('POLL_TIMEOUT_SECONDS', 20),
     pollIntervalMs: asNumber('POLL_INTERVAL_MS', 1200),

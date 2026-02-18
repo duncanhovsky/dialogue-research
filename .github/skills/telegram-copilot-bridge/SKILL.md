@@ -12,9 +12,9 @@ Use this skill to operate a Telegram bot as a conversation channel for VS Code C
 
 ## Local token setup (VS Code)
 
-1. Open `.vscode/mcp.json` and keep `TELEGRAM_BOT_TOKEN` bound to `${input:telegramBotToken}`.
-2. Start MCP server in VS Code; input your Bot Token when prompted.
-3. Alternative: set token in local environment based on `.env.example` for daemon mode.
+1. Open `.vscode/mcp.json` and keep `TELEGRAM_BOT_TOKEN` bound to `${env:TELEGRAM_BOT_TOKEN}`.
+2. Set `TELEGRAM_BOT_TOKEN` in local user environment and restart VS Code.
+3. Optional proxy variables for restricted networks: `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`.
 
 Do not commit real token values into repository files.
 

@@ -53,11 +53,26 @@ npm run build
 
 ## Telegram Bot Token 配置（本地 VS Code Copilot）
 
-推荐方式（MCP 输入变量）：
+推荐方式（系统环境变量）：
 
-1. 保持 `.vscode/mcp.json` 中 `TELEGRAM_BOT_TOKEN` 为 `${input:telegramBotToken}`。
-2. 启动 MCP 服务时，VS Code 会弹窗要求输入 Token。
-3. Token 仅保存在本地会话，不写入仓库文件。
+1. 保持 `.vscode/mcp.json` 中 `TELEGRAM_BOT_TOKEN` 为 `${env:TELEGRAM_BOT_TOKEN}`。
+2. 在本机用户环境变量中设置 `TELEGRAM_BOT_TOKEN`。
+3. 重启 VS Code 让 MCP 读取到最新环境变量。
+
+## 本地 HTTP/HTTPS 代理配置
+
+如果你的网络需要代理访问 Telegram API，请在本机环境变量设置：
+
+- `HTTP_PROXY`：HTTP 代理地址（如 `http://127.0.0.1:7890`）
+- `HTTPS_PROXY`：HTTPS 代理地址（推荐）
+- `NO_PROXY`：不走代理的域名列表（逗号分隔，如 `localhost,127.0.0.1,.corp.local`）
+
+本项目会自动读取以上变量并用于 Telegram 请求。`NO_PROXY` 支持精确域名和 `.example.com` 后缀匹配。
+
+安全提示：
+
+- 不要把你的本地代理地址、Token 或 PAC 地址写入仓库文件。
+- `.vscode/mcp.json` 已使用 `${env:...}` 占位，不会上传你的本地值。
 
 可选方式（守护进程）：
 
@@ -105,6 +120,9 @@ npm run daemon:start
 - `DEFAULT_MODEL`：默认模型 ID（默认 `gpt-5.3-codex`）
 - `MODEL_CATALOG_PATH`：模型目录文件路径（默认 `./config/models.catalog.json`）
 - `GITHUB_REPO_URL`：`/start` 欢迎语中展示的仓库地址
+- `HTTP_PROXY`：可选，Telegram 请求使用的 HTTP 代理
+- `HTTPS_PROXY`：可选，Telegram 请求使用的 HTTPS 代理
+- `NO_PROXY`：可选，指定不走代理的域名
 
 ## Telegram 对话命令
 

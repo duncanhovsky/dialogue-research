@@ -3,6 +3,9 @@ export type ReplyMode = 'manual' | 'auto';
 export interface AppConfig {
   telegramBotToken: string;
   telegramApiBase: string;
+  httpProxy?: string;
+  httpsProxy?: string;
+  noProxy?: string;
   replyMode: ReplyMode;
   pollTimeoutSeconds: number;
   pollIntervalMs: number;
