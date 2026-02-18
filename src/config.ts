@@ -49,8 +49,9 @@ export function loadConfig(options?: LoadConfigOptions): AppConfig {
     paperDbDir: process.env.PAPER_DB_DIR ?? './data/papers/library',
     defaultTopic: process.env.DEFAULT_TOPIC ?? 'default',
     defaultAgent: process.env.DEFAULT_AGENT ?? 'default',
-    defaultModel: process.env.DEFAULT_MODEL ?? 'gpt-5.3-codex',
+    defaultModel: process.env.DEFAULT_MODEL ?? 'gpt-4o',
     modelCatalogPath: process.env.MODEL_CATALOG_PATH ?? './config/models.catalog.json',
-    githubRepoUrl: process.env.GITHUB_REPO_URL ?? 'https://github.com/duncanhovsky/telegram-copilot-bridge-skill'
+    devWorkspaceRoot: process.env.DEV_WORKSPACE_ROOT ?? 'E:\\project\\bot_ws',
+    githubRepoUrl: process.env.GITHUB_REPO_URL ?? 'https://github.com/duncanhovsky/dialogue-research'
   };
 }

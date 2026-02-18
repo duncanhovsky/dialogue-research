@@ -18,6 +18,7 @@ export interface AppConfig {
   defaultAgent: string;
   defaultModel: string;
   modelCatalogPath: string;
+  devWorkspaceRoot: string;
   githubRepoUrl: string;
 }
 
@@ -57,6 +58,30 @@ export interface TelegramUpdate {
       mime_type?: string;
       file_size?: number;
     };
+  };
+  callback_query?: {
+    id: string;
+    from: {
+      id: number;
+      is_bot: boolean;
+      first_name: string;
+      username?: string;
+      language_code?: string;
+    };
+    message?: {
+      message_id: number;
+      date: number;
+      chat: {
+        id: number;
+        type: string;
+        title?: string;
+        username?: string;
+        first_name?: string;
+        last_name?: string;
+      };
+      text?: string;
+    };
+    data?: string;
   };
 }
 

@@ -18,11 +18,12 @@
         "DB_PATH": "./data/sessions.sqlite",
         "PAPER_CACHE_DIR": "./data/papers/cache",
         "PAPER_DB_DIR": "./data/papers/library",
+        "DEV_WORKSPACE_ROOT": "${env:DEV_WORKSPACE_ROOT}",
         "DEFAULT_TOPIC": "default",
         "DEFAULT_AGENT": "default",
-        "DEFAULT_MODEL": "gpt-5.3-codex",
+        "DEFAULT_MODEL": "gpt-4o",
         "MODEL_CATALOG_PATH": "./config/models.catalog.json",
-        "GITHUB_REPO_URL": "https://github.com/duncanhovsky/telegram-copilot-bridge-skill",
+        "GITHUB_REPO_URL": "https://github.com/duncanhovsky/dialogue-research",
         "MCP_DEBUG_LOG_PATH": "./data/mcp-debug.log"
       }
     }

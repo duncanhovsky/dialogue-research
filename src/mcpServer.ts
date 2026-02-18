@@ -576,6 +576,7 @@ async function callTool(
         defaultAgent: config.defaultAgent,
         defaultModel: config.defaultModel,
         modelCatalogPath: config.modelCatalogPath,
+        devWorkspaceRoot: config.devWorkspaceRoot,
         githubRepoUrl: config.githubRepoUrl
       }, profile.topic, profile.agent, selectedModel);
     }

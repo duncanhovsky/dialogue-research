@@ -100,6 +100,16 @@ export class PaperManager {
     }
   }
 
+  listRecent(chatId: number, topic: string, limit = 8): PaperRecord[] {
+    const index = this.readIndex();
+    return index.filter((item) => item.chatId === chatId && item.topic === topic).slice(0, limit);
+  }
+
+  listRecentAll(chatId: number, limit = 8): PaperRecord[] {
+    const index = this.readIndex();
+    return index.filter((item) => item.chatId === chatId).slice(0, limit);
+  }
+
   answerQuestion(record: PaperRecord, question: string): string {
     if (!fs.existsSync(record.textPath)) {
       return '未找到论文文本内容，无法回答。';
@@ -159,6 +169,20 @@ export class PaperManager {
 
     current.unshift(record);
     fs.writeFileSync(indexPath, JSON.stringify(current.slice(0, 500), null, 2), 'utf8');
+  }
+
+  private readIndex(): PaperRecord[] {
+    const indexPath = path.join(this.dbDir, 'index.json');
+    if (!fs.existsSync(indexPath)) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(fs.readFileSync(indexPath, 'utf8')) as PaperRecord[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
   }
 
   private retrieveSnippets(text: string, question: string, limit: number): string[] {

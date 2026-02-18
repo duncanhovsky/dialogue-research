@@ -1,8 +1,8 @@
 {
-  "name": "telegram-copilot-bridge-skill",
+  "name": "dialogue-research",
   "version": "0.1.0",
   "private": false,
-  "description": "MCP server + GitHub Skill for bridging Telegram bot and VS Code Copilot chat",
+  "description": "Dialogue-Research: Telegram-based conversational research for papers and development workflows",
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",

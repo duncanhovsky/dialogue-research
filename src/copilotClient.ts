@@ -48,6 +48,8 @@ export class CopilotClient {
 
   private readonly apiKey: string;
 
+  private readonly apiKeySource: 'copilot_api_key' | 'github_token' | 'none';
+
   private readonly maxRetries: number;
 
   private readonly retryBaseMs: number;
@@ -62,7 +64,18 @@ export class CopilotClient {
 
   constructor(private readonly config: AppConfig) {
     this.endpoint = process.env.COPILOT_CHAT_COMPLETIONS_URL ?? 'https://models.inference.ai.azure.com/chat/completions';
-    this.apiKey = process.env.COPILOT_API_KEY ?? process.env.GITHUB_TOKEN ?? '';
+    const copilotApiKey = process.env.COPILOT_API_KEY;
+    const githubToken = process.env.GITHUB_TOKEN;
+    if (copilotApiKey) {
+      this.apiKey = copilotApiKey;
+      this.apiKeySource = 'copilot_api_key';
+    } else if (githubToken) {
+      this.apiKey = githubToken;
+      this.apiKeySource = 'github_token';
+    } else {
+      this.apiKey = '';
+      this.apiKeySource = 'none';
+    }
     this.maxRetries = this.asNumber('COPILOT_MAX_RETRIES', 3, 1, 8);
     this.retryBaseMs = this.asNumber('COPILOT_RETRY_BASE_MS', 600, 100, 10000);
     this.timeoutMs = this.asNumber('COPILOT_TIMEOUT_MS', 45000, 1000, 180000);
@@ -76,6 +89,31 @@ export class CopilotClient {
 
   isEnabled(): boolean {
     return Boolean(this.apiKey);
+  }
+
+  async discoverAvailableChatModelIds(seedIds: string[]): Promise<string[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+
+    const commonCandidates = ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-5'];
+    const fromModelsEndpoint = await this.fetchModelIdsFromEndpoint();
+    const endpointDerived = fromModelsEndpoint
+      .map((id) => this.extractShortId(id))
+      .filter((id): id is string => Boolean(id));
+
+    const candidateIds = [...new Set([...seedIds, ...commonCandidates, ...endpointDerived].map((item) => item.trim()))]
+      .filter(Boolean)
+      .slice(0, 20);
+
+    const available: string[] = [];
+    for (const modelId of candidateIds) {
+      if (await this.canCompleteWithModel(modelId)) {
+        available.push(modelId);
+      }
+    }
+
+    return available;
   }
 
   async generateReply(params: GenerateReplyParams): Promise<string> {
@@ -130,6 +168,10 @@ export class CopilotClient {
 
         if (!response.ok) {
           const body = await response.text();
+          const maybeFatal = this.asNonRetryableAuthError(response.status, body);
+          if (maybeFatal) {
+            throw maybeFatal;
+          }
           throw new Error(`Copilot completion failed: ${response.status} ${body}`);
         }
 
@@ -158,6 +200,9 @@ export class CopilotClient {
         return text;
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
+        if (error instanceof Error && /缺少 models 权限/i.test(error.message)) {
+          break;
+        }
         if (attempt >= this.maxRetries) {
           break;
         }
@@ -210,6 +255,115 @@ export class CopilotClient {
 
   private writeUsageLog(record: UsageLogRecord): void {
     fs.appendFileSync(this.usageLogPath, `${JSON.stringify(record)}\n`, 'utf8');
+  }
+
+  private async fetchModelIdsFromEndpoint(): Promise<string[]> {
+    const modelsEndpoint = this.getModelsEndpoint();
+    if (!modelsEndpoint) {
+      return [];
+    }
+
+    try {
+      const response = await undiciFetch(modelsEndpoint, {
+        method: 'GET',
+        headers: {
+          authorization: `Bearer ${this.apiKey}`
+        }
+      });
+
+      if (!response.ok) {
+        return [];
+      }
+
+      const json = (await response.json()) as { data?: Array<{ id?: string }> } | Array<{ id?: string }>;
+      if (Array.isArray(json)) {
+        return json.map((item) => item?.id ?? '').filter(Boolean);
+      }
+      return (json.data ?? []).map((item) => item?.id ?? '').filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  private async canCompleteWithModel(modelId: string): Promise<boolean> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), Math.min(this.timeoutMs, 12000));
+    try {
+      const response = await undiciFetch(this.endpoint, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${this.apiKey}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: modelId,
+          temperature: 0,
+          max_tokens: 4,
+          messages: [{ role: 'user', content: 'ping' }]
+        }),
+        signal: controller.signal
+      });
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private getModelsEndpoint(): string | null {
+    const trimmed = this.endpoint.replace(/\/+$/, '');
+    const suffix = '/chat/completions';
+    if (!trimmed.toLowerCase().endsWith(suffix)) {
+      return null;
+    }
+    return `${trimmed.slice(0, -suffix.length)}/models`;
+  }
+
+  private extractShortId(rawId: string): string | null {
+    if (!rawId) {
+      return null;
+    }
+    if (/^[a-z0-9][a-z0-9._-]*$/i.test(rawId)) {
+      return rawId;
+    }
+
+    const match = rawId.match(/\/models\/([^/]+)\/versions\//i);
+    if (!match?.[1]) {
+      return null;
+    }
+
+    const candidate = decodeURIComponent(match[1]);
+    if (/^[a-z0-9][a-z0-9._-]*$/i.test(candidate)) {
+      return candidate;
+    }
+    return null;
+  }
+
+  private asNonRetryableAuthError(status: number, body: string): Error | null {
+    if (status !== 401 && status !== 403) {
+      return null;
+    }
+
+    const lowered = body.toLowerCase();
+    if (lowered.includes('models') && lowered.includes('permission')) {
+      const tokenHint =
+        this.apiKeySource === 'github_token'
+          ? '当前使用的是 GITHUB_TOKEN，请为该 Token 开启 models 读取权限。'
+          : this.apiKeySource === 'copilot_api_key'
+            ? '当前使用的是 COPILOT_API_KEY，请确认该 Key 具备访问模型接口权限。'
+            : '请先配置有权限的 COPILOT_API_KEY 或 GITHUB_TOKEN。';
+
+      return new Error(
+        [
+          'Copilot completion failed: 缺少 models 权限。',
+          tokenHint,
+          '也可以改用具备权限的端点：设置 COPILOT_CHAT_COMPLETIONS_URL 后重启 daemon。'
+        ].join(' ')
+      );
+    }
+
+    return null;
   }
 
   private asNumber(name: string, fallback: number, min: number, max: number): number {

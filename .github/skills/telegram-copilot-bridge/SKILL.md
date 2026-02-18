@@ -14,9 +14,24 @@ Use this skill to operate a Telegram bot as a conversation channel for VS Code C
 
 1. Open `.vscode/mcp.json` and keep `TELEGRAM_BOT_TOKEN` bound to `${env:TELEGRAM_BOT_TOKEN}`.
 2. Set `TELEGRAM_BOT_TOKEN` in local user environment and restart VS Code.
-3. Optional proxy variables for restricted networks: `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`.
+3. Set `GITHUB_TOKEN` or `COPILOT_API_KEY` for automatic model invocation by daemon.
+4. Optional proxy variables for restricted networks: `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`.
 
 Do not commit real token values into repository files.
+
+## Mandatory environment guardrails
+
+Before executing sync/reply actions, always ensure:
+
+- `TELEGRAM_BOT_TOKEN` is configured and readable by current process.
+- At least one of `GITHUB_TOKEN` or `COPILOT_API_KEY` is configured for auto model replies.
+
+If missing variables are detected, you must:
+
+1. Stop normal workflow execution.
+2. Tell the user exactly which variable is missing.
+3. Provide concrete OS-level setup steps (PowerShell commands on Windows).
+4. Instruct user to restart daemon and VS Code window after updating env.
 
 ## Commands in Telegram
 
@@ -63,6 +78,8 @@ Do not commit real token values into repository files.
 4. Generate Copilot response using selected `agent` and context summary.
 5. Save assistant reply through `session_append` and send it via `telegram_send_message`.
 6. Persist next offset using `bridge_set_offset`.
+
+When running in auto daemon mode, treat this as continuous loop behavior and keep consuming new updates without requiring manual slash invocation.
 
 ## Continuous running with minimal Copilot token consumption
 

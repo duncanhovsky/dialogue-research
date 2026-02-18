@@ -4,6 +4,15 @@ import { promisify } from 'node:util';
 import { Dispatcher, ProxyAgent, fetch as undiciFetch } from 'undici';
 import { AppConfig, TelegramFileInfo, TelegramUpdate } from './types.js';
 
+export interface InlineKeyboardButton {
+  text: string;
+  callback_data: string;
+}
+
+export interface InlineKeyboardMarkup {
+  inline_keyboard: InlineKeyboardButton[][];
+}
+
 const execFileAsync = promisify(execFile);
 
 const updatesSchema = z.object({
@@ -16,6 +25,11 @@ const sendSchema = z.object({
   result: z.object({
     message_id: z.number()
   })
+});
+
+const callbackAnswerSchema = z.object({
+  ok: z.boolean(),
+  result: z.boolean().optional()
 });
 
 const getFileSchema = z.object({
@@ -51,7 +65,7 @@ export class TelegramClient {
   async getUpdates(offset?: number): Promise<TelegramUpdate[]> {
     const payload: Record<string, unknown> = {
       timeout: this.config.pollTimeoutSeconds,
-      allowed_updates: ['message']
+      allowed_updates: ['message', 'callback_query']
     };
     if (typeof offset === 'number') {
       payload.offset = offset;
@@ -66,17 +80,57 @@ export class TelegramClient {
     return parsed.result as TelegramUpdate[];
   }
 
-  async sendMessage(chatId: number, text: string): Promise<number> {
-    const json = await this.postWithFallback('sendMessage', {
+  async sendMessage(chatId: number, text: string, replyMarkup?: InlineKeyboardMarkup): Promise<number> {
+    const payload: Record<string, unknown> = {
       chat_id: chatId,
       text
-    });
+    };
+    if (replyMarkup) {
+      payload.reply_markup = replyMarkup;
+    }
+
+    const json = await this.postWithFallback('sendMessage', payload);
     const parsed = sendSchema.parse(json);
     if (!parsed.ok) {
       throw new Error('Telegram sendMessage returned ok=false');
     }
 
     return parsed.result.message_id;
+  }
+
+  async editMessageText(chatId: number, messageId: number, text: string, replyMarkup?: InlineKeyboardMarkup): Promise<number> {
+    const payload: Record<string, unknown> = {
+      chat_id: chatId,
+      message_id: messageId,
+      text
+    };
+    if (replyMarkup) {
+      payload.reply_markup = replyMarkup;
+    }
+
+    const json = await this.postWithFallback('editMessageText', payload);
+    const parsed = sendSchema.parse(json);
+    if (!parsed.ok) {
+      throw new Error('Telegram editMessageText returned ok=false');
+    }
+
+    return parsed.result.message_id;
+  }
+
+  async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
+    const payload: Record<string, unknown> = {
+      callback_query_id: callbackQueryId
+    };
+    if (text) {
+      payload.text = text;
+      payload.show_alert = false;
+    }
+
+    const json = await this.postWithFallback('answerCallbackQuery', payload);
+    const parsed = callbackAnswerSchema.parse(json);
+    if (!parsed.ok) {
+      throw new Error('Telegram answerCallbackQuery returned ok=false');
+    }
   }
 
   async getFile(fileId: string): Promise<TelegramFileInfo> {

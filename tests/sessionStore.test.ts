@@ -20,9 +20,10 @@ function makeStore(): SessionStore {
     dbPath: path.join(os.tmpdir(), `telegram-copilot-test-${Date.now()}-${Math.random()}.sqlite`),
     defaultTopic: 'default',
     defaultAgent: 'default',
-    defaultModel: 'gpt-5.3-codex',
+    defaultModel: 'gpt-4o',
     modelCatalogPath: './config/models.catalog.json',
-    githubRepoUrl: 'https://github.com/duncanhovsky/telegram-copilot-bridge-skill'
+    devWorkspaceRoot: 'E:\\project\\bot_ws',
+    githubRepoUrl: 'https://github.com/duncanhovsky/dialogue-research'
   };
 
   const store = new SessionStore(config);
@@ -81,7 +82,7 @@ describe('SessionStore', () => {
 
   it('stores and reads selected model', () => {
     const store = makeStore();
-    expect(store.getSelectedModel(4, 'research')).toBe('gpt-5.3-codex');
+    expect(store.getSelectedModel(4, 'research')).toBe('gpt-4o');
     store.setSelectedModel(4, 'research', 'gemini-2.5-pro');
     expect(store.getSelectedModel(4, 'research')).toBe('gemini-2.5-pro');
   });

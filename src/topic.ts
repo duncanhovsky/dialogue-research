@@ -1,25 +1,86 @@
 import { AppConfig } from './types.js';
+import { UiLanguage, normalizeUiLanguage, pickLanguageText } from './i18n.js';
 
 const TOPIC_RE = /^\/topic\s+([\w\-]{1,64})$/i;
 const AGENT_RE = /^\/agent\s+([\w\-.]{1,64})$/i;
 const HISTORY_RE = /^\/history(?:\s+(.+))?$/i;
 const MODE_RE = /^\/mode\s+(manual|auto)$/i;
 const START_RE = /^\/start(?:@[\w_]+)?$/i;
+const LANGUAGE_RE = /^\/(?:language|lang)(?:\s+(.+))?$/i;
+const MENU_RE = /^\/menu$/i;
 const MODELS_RE = /^\/models$/i;
+const MODELSYNC_RE = /^\/modelsync$/i;
 const MODEL_RE = /^\/model\s+([\w\-.]{1,64})$/i;
-const ASK_RE = /^\/ask\s+(.+)$/i;
+const ASKM_RE = /^\/askm\s+([\w\-.]{1,64})\s+(.+)$/i;
+const ASK_RE = /^\/ask(?:\s+--model\s+([\w\-.]{1,64}))?\s+(.+)$/i;
 const PAPER_RE = /^\/paper(?:\s+(current))?$/i;
+const PAPERADD_RE = /^\/paperadd\s+(.+)$/i;
+const PAPERLIST_RE = /^\/paperlist$/i;
+const PAPERORGANIZE_RE = /^\/paperorganize(?:\s+(cot|tot|got))?$/i;
+const PAPERBRAINSTORM_RE = /^\/paperbrainstorm(?:\s+--mode\s+(cot|tot|got))?\s+(.+)$/i;
+const PAPERMODE_RE = /^\/papermode\s+(organize|brainstorm)\s+(cot|tot|got)$/i;
+const DEVWORKSPACE_RE = /^\/devworkspace\s+(.+)$/i;
+const DEVPROJECTS_RE = /^\/devprojects$/i;
+const DEVCREATE_RE = /^\/devcreate\s+([\w\-.]{1,80})$/i;
+const DEVSELECT_RE = /^\/devselect\s+([\w\-.]{1,80})$/i;
+const DEVCLONE_RE = /^\/devclone\s+(https?:\/\/\S+)(?:\s+([\w\-.]{1,80}))?$/i;
+const DEVSTATUS_RE = /^\/devstatus$/i;
+const DEVLS_RE = /^\/devls(?:\s+(.+))?$/i;
+const DEVCAT_RE = /^\/devcat\s+(.+)$/i;
+const DEVRUN_RE = /^\/devrun\s+(.+)$/i;
+const DEVGIT_RE = /^\/devgit(?:\s+(status|branch|log))?$/i;
+
+export type ThinkingMode = 'cot' | 'tot' | 'got';
 
 export interface ParsedMessage {
   topic: string;
   agent: string;
   modelId: string;
   text: string;
-  command?: 'topic' | 'agent' | 'history' | 'mode' | 'start' | 'models' | 'model' | 'ask' | 'paper';
+  command?:
+    | 'topic'
+    | 'agent'
+    | 'history'
+    | 'mode'
+    | 'start'
+    | 'language'
+    | 'menu'
+    | 'models'
+    | 'modelsync'
+    | 'model'
+    | 'ask'
+    | 'paper'
+    | 'paperadd'
+    | 'paperlist'
+    | 'paperorganize'
+    | 'paperbrainstorm'
+    | 'papermode'
+    | 'devworkspace'
+    | 'devprojects'
+    | 'devcreate'
+    | 'devselect'
+    | 'devclone'
+    | 'devstatus'
+    | 'devls'
+    | 'devcat'
+    | 'devrun'
+    | 'devgit';
   mode?: 'manual' | 'auto';
   keyword?: string;
+  languageInput?: string;
   question?: string;
+  askModelId?: string;
+  paperInput?: string;
+  thinkingMode?: ThinkingMode;
+  paperTarget?: 'organize' | 'brainstorm';
+  brainstormQuestion?: string;
+  workspacePath?: string;
+  projectName?: string;
   repoUrl?: string;
+  cloneName?: string;
+  relativePath?: string;
+  shellCommand?: string;
+  gitAction?: 'status' | 'branch' | 'log';
 }
 
 export function parseTelegramText(
@@ -27,12 +88,14 @@ export function parseTelegramText(
   config: AppConfig,
   currentTopic?: string,
   currentAgent?: string,
-  currentModelId?: string
+  currentModelId?: string,
+  currentLanguage?: UiLanguage
 ): ParsedMessage {
   const raw = (input ?? '').trim();
   const topic = currentTopic ?? config.defaultTopic;
   const agent = currentAgent ?? config.defaultAgent;
   const modelId = currentModelId ?? config.defaultModel;
+  const language = normalizeUiLanguage(currentLanguage, 'zh');
 
   if (START_RE.test(raw)) {
     return {
@@ -41,7 +104,29 @@ export function parseTelegramText(
       modelId,
       command: 'start',
       repoUrl: config.githubRepoUrl,
-      text: buildWelcomeMessage(config.githubRepoUrl)
+      text: buildWelcomeMessage(config.githubRepoUrl, config.devWorkspaceRoot, language)
+    };
+  }
+
+  const languageMatch = raw.match(LANGUAGE_RE);
+  if (languageMatch) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'language',
+      languageInput: languageMatch[1]?.trim(),
+      text: 'Language config requested'
+    };
+  }
+
+  if (MENU_RE.test(raw)) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'menu',
+      text: 'Main menu requested'
     };
   }
 
@@ -52,6 +137,16 @@ export function parseTelegramText(
       modelId,
       command: 'models',
       text: 'Model list requested'
+    };
+  }
+
+  if (MODELSYNC_RE.test(raw)) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'modelsync',
+      text: 'Model sync requested'
     };
   }
 
@@ -67,13 +162,31 @@ export function parseTelegramText(
   }
 
   const askMatch = raw.match(ASK_RE);
-  if (askMatch) {
+  const askmMatch = raw.match(ASKM_RE);
+  if (askmMatch) {
+    const askModelId = askmMatch[1]?.trim();
+    const question = askmMatch[2]?.trim() ?? '';
     return {
       topic,
       agent,
-      modelId,
+      modelId: askModelId || modelId,
       command: 'ask',
-      question: askMatch[1].trim(),
+      question,
+      askModelId,
+      text: 'Paper question requested'
+    };
+  }
+
+  if (askMatch) {
+    const askModelId = askMatch[1]?.trim();
+    const question = askMatch[2]?.trim() ?? '';
+    return {
+      topic,
+      agent,
+      modelId: askModelId || modelId,
+      command: 'ask',
+      question,
+      askModelId,
       text: 'Paper question requested'
     };
   }
@@ -85,6 +198,183 @@ export function parseTelegramText(
       modelId,
       command: 'paper',
       text: 'Paper status requested'
+    };
+  }
+
+  const paperAddMatch = raw.match(PAPERADD_RE);
+  if (paperAddMatch) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'paperadd',
+      paperInput: paperAddMatch[1].trim(),
+      text: 'Paper add requested'
+    };
+  }
+
+  if (PAPERLIST_RE.test(raw)) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'paperlist',
+      text: 'Paper list requested'
+    };
+  }
+
+  const paperOrganizeMatch = raw.match(PAPERORGANIZE_RE);
+  if (paperOrganizeMatch) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'paperorganize',
+      thinkingMode: (paperOrganizeMatch[1]?.toLowerCase() as ThinkingMode | undefined) ?? undefined,
+      text: 'Paper organize requested'
+    };
+  }
+
+  const paperBrainstormMatch = raw.match(PAPERBRAINSTORM_RE);
+  if (paperBrainstormMatch) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'paperbrainstorm',
+      thinkingMode: (paperBrainstormMatch[1]?.toLowerCase() as ThinkingMode | undefined) ?? undefined,
+      brainstormQuestion: paperBrainstormMatch[2].trim(),
+      text: 'Paper brainstorm requested'
+    };
+  }
+
+  const paperModeMatch = raw.match(PAPERMODE_RE);
+  if (paperModeMatch) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'papermode',
+      paperTarget: paperModeMatch[1].toLowerCase() as 'organize' | 'brainstorm',
+      thinkingMode: paperModeMatch[2].toLowerCase() as ThinkingMode,
+      text: 'Paper mode config requested'
+    };
+  }
+
+  const devWorkspaceMatch = raw.match(DEVWORKSPACE_RE);
+  if (devWorkspaceMatch) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'devworkspace',
+      workspacePath: devWorkspaceMatch[1].trim(),
+      text: 'Dev workspace set requested'
+    };
+  }
+
+  if (DEVPROJECTS_RE.test(raw)) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'devprojects',
+      text: 'Dev projects list requested'
+    };
+  }
+
+  const devCreateMatch = raw.match(DEVCREATE_RE);
+  if (devCreateMatch) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'devcreate',
+      projectName: devCreateMatch[1],
+      text: 'Dev create project requested'
+    };
+  }
+
+  const devSelectMatch = raw.match(DEVSELECT_RE);
+  if (devSelectMatch) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'devselect',
+      projectName: devSelectMatch[1],
+      text: 'Dev select project requested'
+    };
+  }
+
+  const devCloneMatch = raw.match(DEVCLONE_RE);
+  if (devCloneMatch) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'devclone',
+      repoUrl: devCloneMatch[1],
+      cloneName: devCloneMatch[2]?.trim(),
+      text: 'Dev clone project requested'
+    };
+  }
+
+  if (DEVSTATUS_RE.test(raw)) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'devstatus',
+      text: 'Dev status requested'
+    };
+  }
+
+  const devLsMatch = raw.match(DEVLS_RE);
+  if (devLsMatch) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'devls',
+      relativePath: devLsMatch[1]?.trim(),
+      text: 'Dev list files requested'
+    };
+  }
+
+  const devCatMatch = raw.match(DEVCAT_RE);
+  if (devCatMatch) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'devcat',
+      relativePath: devCatMatch[1].trim(),
+      text: 'Dev read file requested'
+    };
+  }
+
+  const devRunMatch = raw.match(DEVRUN_RE);
+  if (devRunMatch) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'devrun',
+      shellCommand: devRunMatch[1].trim(),
+      text: 'Dev run command requested'
+    };
+  }
+
+  const devGitMatch = raw.match(DEVGIT_RE);
+  if (devGitMatch) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'devgit',
+      gitAction: (devGitMatch[1]?.toLowerCase() as 'status' | 'branch' | 'log' | undefined) ?? 'status',
+      text: 'Dev git action requested'
     };
   }
 
@@ -119,11 +409,28 @@ export function parseTelegramText(
   return { topic, agent, modelId, text: raw };
 }
 
-function buildWelcomeMessage(repoUrl: string): string {
-  return [
-    '欢迎使用 Telegram ↔ VS Code Copilot Bridge Skill。',
-    '你可以在 Telegram 中直接与 Copilot 对话，并支持历史续聊、智能体切换、模型选择与 PDF 论文分析。',
-    '常用命令：/start /topic /agent /models /model /history /mode /paper /ask',
-    `GitHub 仓库：${repoUrl}`
-  ].join('\n');
+function buildWelcomeMessage(repoUrl: string, devWorkspaceRoot: string, language: UiLanguage): string {
+  return pickLanguageText(
+    language,
+    [
+      '欢迎使用 Dialogue-Research。',
+      'Dialogue-Research = 对话式科研（论文研究 + 开发协作）。',
+      '你可以在 Telegram 中直接与 Copilot 对话，并支持历史续聊、智能体切换、模型选择与 PDF 论文分析。',
+      `首次建议先配置开发工作空间：/devworkspace ${devWorkspaceRoot}`,
+      '语言设置：/language zh 或 /language en（简写：/lang zh|en）',
+      '常用命令：/start /menu /topic /agent /models /modelsync /model /history /mode /paper /paperadd /paperlist /paperorganize /paperbrainstorm /papermode /devworkspace /devprojects /devcreate /devselect /devclone /devstatus /devls /devcat /devrun /devgit /ask /askm',
+      '论文问答可临时指定模型：/ask --model <model-id> <问题>（简写：/askm <model-id> <问题>）',
+      `GitHub 仓库：${repoUrl}`
+    ].join('\n'),
+    [
+      'Welcome to Dialogue-Research.',
+      'Dialogue-Research = conversational research for papers and development workflows.',
+      'You can chat with Copilot in Telegram with history continuation, agent/model selection, and PDF paper analysis.',
+      `Recommended first step: /devworkspace ${devWorkspaceRoot}`,
+      'Language setting: /language zh or /language en (short: /lang zh|en)',
+      'Common commands: /start /menu /topic /agent /models /modelsync /model /history /mode /paper /paperadd /paperlist /paperorganize /paperbrainstorm /papermode /devworkspace /devprojects /devcreate /devselect /devclone /devstatus /devls /devcat /devrun /devgit /ask /askm',
+      'Temporary model override for paper QA: /ask --model <model-id> <question> (short: /askm <model-id> <question>)',
+      `GitHub repo: ${repoUrl}`
+    ].join('\n')
+  );
 }

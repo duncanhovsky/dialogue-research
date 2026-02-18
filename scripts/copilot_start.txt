@@ -1,0 +1,5 @@
+# manual
+/telegram-copilot-bridge action=sync topic=default mode=auto
+
+# auto
+npm run daemon:start
