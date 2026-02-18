@@ -37,7 +37,16 @@ interface ArxivCandidate {
   pdfUrl: string;
 }
 
+interface PaginationResult<T> {
+  pageItems: T[];
+  page: number;
+  totalPages: number;
+  startIndex: number;
+}
+
 const devWorkspace = new DevWorkspaceManager();
+const PAPER_LIST_PAGE_SIZE = 6;
+const DEV_PROJECT_PAGE_SIZE = 8;
 
 function normalizeThinkingMode(raw: string | undefined, fallback: ThinkingMode = 'cot'): ThinkingMode {
   if (raw === 'cot' || raw === 'tot' || raw === 'got') {
@@ -72,92 +81,91 @@ function formatModelList(catalog: ModelCatalog, language: UiLanguage): string {
 }
 
 function buildMainMenuKeyboard(mode: UiMode, language: UiLanguage): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [
-      [
-        {
-          text:
-            language === 'en'
-              ? mode === 'paper'
-                ? '📚 Paper (Current)'
-                : '📚 Paper'
-              : mode === 'paper'
-                ? '📚 论文模式（当前）'
-                : '📚 论文模式',
-          callback_data: 'menu:paper'
-        },
-        {
-          text:
-            language === 'en'
-              ? mode === 'dev'
-                ? '💻 Dev (Current)'
-                : '💻 Dev'
-              : mode === 'dev'
-                ? '💻 开发模式（当前）'
-                : '💻 开发模式',
-          callback_data: 'menu:dev'
-        }
-      ],
-      [{ text: language === 'en' ? '🏠 Home' : '🏠 主菜单', callback_data: 'menu:home' }]
-    ]
-  };
-}
-
-function buildPaperActionKeyboard(language: UiLanguage): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [
-      [
-        { text: language === 'en' ? '➕ Add Paper' : '➕ 添加论文', callback_data: 'paper:add' },
-        { text: language === 'en' ? '📚 History' : '📚 历史论文', callback_data: 'paper:history' }
-      ],
-      [
-        { text: language === 'en' ? '🧾 Organize' : '🧾 信息整理', callback_data: 'paper:organize' },
-        { text: language === 'en' ? '🧠 Brainstorm' : '🧠 头脑风暴', callback_data: 'paper:brainstorm' }
-      ],
-      [{ text: language === 'en' ? '🏠 Back Home' : '🏠 返回主菜单', callback_data: 'menu:home' }]
-    ]
-  };
-}
-
-function buildDevActionKeyboard(language: UiLanguage): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [
-      [
-        { text: language === 'en' ? '📁 Projects' : '📁 项目列表', callback_data: 'dev:projects' },
-        { text: language === 'en' ? '📌 Status' : '📌 当前状态', callback_data: 'dev:status' }
-      ],
-      [
-        { text: language === 'en' ? '➕ Create' : '➕ 创建项目', callback_data: 'dev:create' },
-        { text: language === 'en' ? '📥 Clone' : '📥 克隆项目', callback_data: 'dev:clone' }
-      ],
-      [{ text: language === 'en' ? '🏠 Back Home' : '🏠 返回主菜单', callback_data: 'menu:home' }]
-    ]
-  };
-}
-
-function buildMainMenuText(mode: UiMode, language: UiLanguage): string {
-  const modeLabel = mode === 'paper' ? '论文模式' : mode === 'dev' ? '开发模式' : '主菜单';
-  if (language === 'en') {
-    const enModeLabel = mode === 'paper' ? 'Paper' : mode === 'dev' ? 'Development' : 'Home';
-    return [
-      '🤖 Dialogue-Research Main Menu',
-      `Current mode: ${enModeLabel}`,
-      '',
-      '📚 Paper mode: organize, QA, and brainstorm around current paper.',
-      '💻 Development mode: conversational coding around current project.',
-      '',
-      'Tap buttons to switch mode anytime.'
-    ].join('\n');
+  if (mode === 'paper') {
+    return {
+      inline_keyboard: [
+        [
+          { text: language === 'en' ? '➕ Add Paper' : '➕ 添加论文', callback_data: 'paper:add' },
+          { text: language === 'en' ? '📚 History' : '📚 历史论文', callback_data: 'paper:history' }
+        ],
+        [
+          { text: language === 'en' ? '🧾 Organize' : '🧾 信息整理', callback_data: 'paper:organize' },
+          { text: language === 'en' ? '🧠 Brainstorm' : '🧠 头脑风暴', callback_data: 'paper:brainstorm' }
+        ],
+        [{ text: language === 'en' ? '🆘 Paper Help' : '🆘 论文帮助', callback_data: 'paper:help' }],
+        [
+          { text: language === 'en' ? '💻 Dev Menu' : '💻 开发菜单', callback_data: 'menu:dev' },
+          { text: language === 'en' ? '🏠 Home' : '🏠 主菜单', callback_data: 'menu:home' }
+        ]
+      ]
+    };
   }
-  return [
-    '🤖 对话式科研主菜单',
-    `当前模式：${modeLabel}`,
-    '',
-    '📚 论文模式：围绕当前论文做整理、问答、头脑风暴。',
-    '💻 开发模式：围绕当前项目做对话式开发。',
-    '',
-    '可随时点击按钮切换模式。'
-  ].join('\n');
+
+  if (mode === 'dev') {
+    return {
+      inline_keyboard: [
+        [
+          { text: language === 'en' ? '📁 Projects' : '📁 项目列表', callback_data: 'dev:projects' },
+          { text: language === 'en' ? '📌 Status' : '📌 当前状态', callback_data: 'dev:status' }
+        ],
+        [
+          { text: language === 'en' ? '➕ Create' : '➕ 创建项目', callback_data: 'dev:create' },
+          { text: language === 'en' ? '📥 Clone' : '📥 克隆项目', callback_data: 'dev:clone' }
+        ],
+        [{ text: language === 'en' ? '🆘 Dev Help' : '🆘 开发帮助', callback_data: 'dev:help' }],
+        [
+          { text: language === 'en' ? '📚 Paper Menu' : '📚 论文菜单', callback_data: 'menu:paper' },
+          { text: language === 'en' ? '🏠 Home' : '🏠 主菜单', callback_data: 'menu:home' }
+        ]
+      ]
+    };
+  }
+
+  return {
+    inline_keyboard: [
+      [
+        { text: language === 'en' ? '📚 Paper Menu' : '📚 论文菜单', callback_data: 'menu:paper' },
+        { text: language === 'en' ? '💻 Dev Menu' : '💻 开发菜单', callback_data: 'menu:dev' }
+      ]
+    ]
+  };
+}
+
+function buildMainMenuText(mode: UiMode, language: UiLanguage, detail?: string): string {
+  if (language === 'en') {
+    const lines =
+      mode === 'paper'
+        ? [
+            '📚 Paper Menu',
+            'Use buttons to add/switch papers, organize, and brainstorm.',
+            'All paper actions stay in this inline panel to keep chat clean.'
+          ]
+        : mode === 'dev'
+          ? [
+              '💻 Development Menu',
+              'Use buttons to view projects, check status, create or clone.',
+              'All development actions stay in this inline panel to keep chat clean.'
+            ]
+          : [
+              '🤖 Dialogue-Research Main Menu',
+              'Choose a mode below:',
+              '📚 Paper Menu | 💻 Development Menu'
+            ];
+    if (detail) {
+      lines.push('', detail);
+    }
+    return lines.join('\n');
+  }
+  const lines =
+    mode === 'paper'
+      ? ['📚 论文菜单', '通过按钮完成添加/切换论文、信息整理与头脑风暴。', '论文相关操作尽量都在此 inline 面板中完成，减少聊天刷屏。']
+      : mode === 'dev'
+        ? ['💻 开发菜单', '通过按钮查看项目、查看状态、创建或克隆项目。', '开发相关操作尽量都在此 inline 面板中完成，减少聊天刷屏。']
+        : ['🤖 对话式科研主菜单', '请选择下方模式：', '📚 论文菜单 | 💻 开发菜单'];
+  if (detail) {
+    lines.push('', detail);
+  }
+  return lines.join('\n');
 }
 
 function normalizeUiMode(raw: string | undefined): UiMode {
@@ -279,16 +287,96 @@ function readCandidates<T>(store: SessionStore, chatId: number, topic: string, k
   }
 }
 
-function buildArxivPickKeyboard(candidates: ArxivCandidate[], language: UiLanguage): InlineKeyboardMarkup {
-  const rows = candidates.map((item, index) => [{ text: `${index + 1}. ${item.id}`, callback_data: `paper:pick:${index}` }]);
-  rows.push([{ text: language === 'en' ? '🏠 Back Home' : '🏠 返回主菜单', callback_data: 'menu:home' }]);
+function paginateItems<T>(items: T[], page: number, pageSize: number): PaginationResult<T> {
+  if (items.length === 0) {
+    return {
+      pageItems: [],
+      page: 0,
+      totalPages: 1,
+      startIndex: 0
+    };
+  }
+
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  const safePage = Math.min(Math.max(0, page), totalPages - 1);
+  const startIndex = safePage * pageSize;
+  return {
+    pageItems: items.slice(startIndex, startIndex + pageSize),
+    page: safePage,
+    totalPages,
+    startIndex
+  };
+}
+
+function parsePageFromCallback(data: string, prefix: string): number {
+  const raw = data.slice(prefix.length);
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+  return Math.floor(parsed);
+}
+
+function buildPaginationNavRow(
+  language: UiLanguage,
+  page: number,
+  totalPages: number,
+  prevCallbackPrefix: string,
+  nextCallbackPrefix: string
+) {
+  if (totalPages <= 1) {
+    return [] as Array<{ text: string; callback_data: string }>;
+  }
+
+  const row: Array<{ text: string; callback_data: string }> = [];
+  if (page > 0) {
+    row.push({
+      text: language === 'en' ? '⬅️ Prev' : '⬅️ 上一页',
+      callback_data: `${prevCallbackPrefix}${page - 1}`
+    });
+  }
+  if (page < totalPages - 1) {
+    row.push({
+      text: language === 'en' ? 'Next ➡️' : '下一页 ➡️',
+      callback_data: `${nextCallbackPrefix}${page + 1}`
+    });
+  }
+  return row;
+}
+
+function buildArxivPickKeyboard(candidates: ArxivCandidate[], language: UiLanguage, page = 0, pageSize = 5): InlineKeyboardMarkup {
+  const pagination = paginateItems(candidates, page, pageSize);
+  const rows = pagination.pageItems.map((item, index) => [
+    { text: `${pagination.startIndex + index + 1}. ${item.id}`, callback_data: `paper:pick:${pagination.startIndex + index}` }
+  ]);
+  const navRow = buildPaginationNavRow(language, pagination.page, pagination.totalPages, 'paper:pick:page:', 'paper:pick:page:');
+  if (navRow.length > 0) {
+    rows.push(navRow);
+  }
+  rows.push([{ text: language === 'en' ? '↩️ Back to Paper' : '↩️ 返回论文菜单', callback_data: 'menu:paper' }]);
   return { inline_keyboard: rows };
 }
 
-function buildRecentPaperKeyboard(records: PaperRecord[], language: UiLanguage): InlineKeyboardMarkup {
-  const rows = records.map((item, index) => [{ text: `${index + 1}. ${item.title.slice(0, 40)}`, callback_data: `paper:use:${index}` }]);
-  rows.push([{ text: language === 'en' ? '🏠 Back Home' : '🏠 返回主菜单', callback_data: 'menu:home' }]);
+function buildRecentPaperKeyboard(records: PaperRecord[], language: UiLanguage, page = 0, pageSize = PAPER_LIST_PAGE_SIZE): InlineKeyboardMarkup {
+  const pagination = paginateItems(records, page, pageSize);
+  const rows = pagination.pageItems.map((item, index) => [
+    { text: `${pagination.startIndex + index + 1}. ${item.title.slice(0, 40)}`, callback_data: `paper:use:${pagination.startIndex + index}` }
+  ]);
+  const navRow = buildPaginationNavRow(language, pagination.page, pagination.totalPages, 'paper:history:page:', 'paper:history:page:');
+  if (navRow.length > 0) {
+    rows.push(navRow);
+  }
+  rows.push([{ text: language === 'en' ? '↩️ Back to Paper' : '↩️ 返回论文菜单', callback_data: 'menu:paper' }]);
   return { inline_keyboard: rows };
+}
+
+function buildDevProjectsKeyboard(language: UiLanguage, page: number, totalPages: number): InlineKeyboardMarkup {
+  const baseRows = buildMainMenuKeyboard('dev', language).inline_keyboard.map((row) => [...row]);
+  const navRow = buildPaginationNavRow(language, page, totalPages, 'dev:projects:page:', 'dev:projects:page:');
+  if (navRow.length > 0) {
+    baseRows.unshift(navRow);
+  }
+  return { inline_keyboard: baseRows };
 }
 
 async function ingestPaperFromArxiv(
@@ -325,10 +413,12 @@ async function upsertMainMenu(
   store: SessionStore,
   chatId: number,
   topic: string,
-  mode: UiMode
+  mode: UiMode,
+  detail?: string,
+  forceResurface = false
 ): Promise<number> {
   const language = getUiLanguage(store, chatId, topic);
-  const text = buildMainMenuText(mode, language);
+  const text = buildMainMenuText(mode, language, detail);
   const keyboard = buildMainMenuKeyboard(mode, language);
   const rawMessageId = store.getTopicState(chatId, topic, MAIN_MENU_MESSAGE_ID_KEY);
   const existingMessageId = rawMessageId ? Number(rawMessageId) : NaN;
@@ -344,6 +434,12 @@ async function upsertMainMenu(
       if (!/message is not modified/i.test(message)) {
         // fall through to send a new menu message
       } else {
+        if (forceResurface) {
+          const newMessageId = await telegram.sendMessage(chatId, text, keyboard);
+          store.setTopicState(chatId, topic, MAIN_MENU_MESSAGE_ID_KEY, String(newMessageId));
+          store.setTopicState(chatId, topic, UI_MODE_KEY, mode);
+          return newMessageId;
+        }
         store.setTopicState(chatId, topic, UI_MODE_KEY, mode);
         return existingMessageId;
       }
@@ -503,15 +599,14 @@ async function handleMessage(
 
   if (parsed.command === 'start') {
     const currentMode = normalizeUiMode(store.getTopicState(chatId, parsed.topic, UI_MODE_KEY));
-    await upsertMainMenu(telegram, store, chatId, parsed.topic, currentMode);
     await sendChunks(telegram, chatId, parsed.text);
+    await upsertMainMenu(telegram, store, chatId, parsed.topic, currentMode, undefined, true);
     return;
   }
 
   if (parsed.command === 'menu') {
     const currentMode = normalizeUiMode(store.getTopicState(chatId, parsed.topic, UI_MODE_KEY));
-    await upsertMainMenu(telegram, store, chatId, parsed.topic, currentMode);
-    await sendChunks(telegram, chatId, localize(store, chatId, parsed.topic, '主菜单已刷新。', 'Main menu refreshed.'));
+    await upsertMainMenu(telegram, store, chatId, parsed.topic, currentMode, undefined, true);
     return;
   }
 
@@ -1217,7 +1312,7 @@ async function handleMessage(
   }
 
   if (parsed.command === 'paperlist') {
-    const recent = papers.listRecent(chatId, parsed.topic, 6);
+    const recent = papers.listRecent(chatId, parsed.topic, 30);
     if (recent.length === 0) {
       await sendChunks(
         telegram,
@@ -1234,11 +1329,18 @@ async function handleMessage(
     }
 
     saveCandidates(store, chatId, parsed.topic, PAPER_RECENT_RESULTS_KEY, recent);
-    const lines = recent.map((item, index) => `${index + 1}. ${item.title} (${item.category})`).join('\n');
+    const pagination = paginateItems(recent, 0, PAPER_LIST_PAGE_SIZE);
+    const lines = pagination.pageItems.map((item, index) => `${pagination.startIndex + index + 1}. ${item.title} (${item.category})`).join('\n');
     await telegram.sendMessage(
       chatId,
-      localize(store, chatId, parsed.topic, `历史论文（点击按钮激活）：\n${lines}`, `Recent papers (click to activate):\n${lines}`),
-      buildRecentPaperKeyboard(recent, getUiLanguage(store, chatId, parsed.topic))
+      localize(
+        store,
+        chatId,
+        parsed.topic,
+        `历史论文（第 ${pagination.page + 1}/${pagination.totalPages} 页，点击按钮激活）：\n${lines}`,
+        `Recent papers (page ${pagination.page + 1}/${pagination.totalPages}, click to activate):\n${lines}`
+      ),
+      buildRecentPaperKeyboard(recent, getUiLanguage(store, chatId, parsed.topic), pagination.page, PAPER_LIST_PAGE_SIZE)
     );
     return;
   }
@@ -1559,74 +1661,52 @@ async function handleCallbackQuery(
   const topic = config.defaultTopic;
   const data = (callbackQuery.data ?? '').trim();
   const language = getUiLanguage(store, chatId, topic);
+  const callbackMessageId = callbackQuery.message?.message_id;
+
+  const renderPanel = async (mode: UiMode, detail?: string, customKeyboard?: InlineKeyboardMarkup): Promise<void> => {
+    const text = buildMainMenuText(mode, language, detail);
+    const keyboard = customKeyboard ?? buildMainMenuKeyboard(mode, language);
+
+    if (callbackMessageId) {
+      try {
+        const messageId = await telegram.editMessageText(chatId, callbackMessageId, text, keyboard);
+        store.setTopicState(chatId, topic, MAIN_MENU_MESSAGE_ID_KEY, String(messageId));
+        store.setTopicState(chatId, topic, UI_MODE_KEY, mode);
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/message is not modified/i.test(message)) {
+          store.setTopicState(chatId, topic, UI_MODE_KEY, mode);
+          return;
+        }
+      }
+    }
+
+    await upsertMainMenu(telegram, store, chatId, topic, mode, detail);
+  };
 
   if (data === 'menu:paper') {
-    await upsertMainMenu(telegram, store, chatId, topic, 'paper');
+    await renderPanel('paper');
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已切换到论文模式', 'Switched to paper mode'));
-    await sendChunks(
-      telegram,
-      chatId,
-      pickLanguageText(
-        language,
-        [
-          '已进入论文模式。',
-          '论文相关操作请使用：/paperhelp（获取完整论文功能指引）。'
-        ].join('\n'),
-        [
-          'Paper mode enabled.',
-          'For paper-specific operations, run /paperhelp for the full guide.'
-        ].join('\n')
-      )
-    );
-    await telegram.sendMessage(
-      chatId,
-      pickLanguageText(language, '论文模式快捷操作：', 'Paper mode quick actions:'),
-      buildPaperActionKeyboard(language)
-    );
     return;
   }
 
   if (data === 'menu:dev') {
-    await upsertMainMenu(telegram, store, chatId, topic, 'dev');
+    await renderPanel('dev');
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已切换到开发模式', 'Switched to development mode'));
-    await sendChunks(
-      telegram,
-      chatId,
-      pickLanguageText(
-        language,
-        [
-          '已进入开发模式。',
-          '开发相关操作请使用：/devhelp（获取完整开发功能指引）。',
-          `首次建议先执行：/devworkspace ${getDevWorkspaceRoot(store, config, chatId, topic)}`,
-          '也可直接发送开发需求，继续对话式开发。'
-        ].join('\n'),
-        [
-          'Development mode enabled.',
-          'For development-specific operations, run /devhelp for the full guide.',
-          `Recommended first step: /devworkspace ${getDevWorkspaceRoot(store, config, chatId, topic)}`,
-          'You can also send coding requests directly for conversational development.'
-        ].join('\n')
-      )
-    );
-    await telegram.sendMessage(
-      chatId,
-      pickLanguageText(language, '开发模式快捷操作：', 'Development mode quick actions:'),
-      buildDevActionKeyboard(language)
-    );
     return;
   }
 
   if (data === 'menu:home') {
-    await upsertMainMenu(telegram, store, chatId, topic, 'home');
+    await renderPanel('home');
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已返回主菜单', 'Back to main menu'));
     return;
   }
 
   if (data === 'paper:add') {
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '请发送论文信息', 'Please send paper details'));
-    await sendChunks(
-      telegram,
-      chatId,
+    await renderPanel(
+      'paper',
       pickLanguageText(
         language,
         ['添加论文支持三种方式：', '1) 直接上传 PDF', '2) /paperadd <arXiv链接或编号>', '3) /paperadd <论文标题关键词>（会返回候选按钮）'].join('\n'),
@@ -1636,25 +1716,69 @@ async function handleCallbackQuery(
     return;
   }
 
-  if (data === 'paper:history') {
-    const recent = papers.listRecent(chatId, topic, 6);
+  if (data === 'paper:help') {
+    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已打开论文帮助', 'Paper help opened'));
+    await renderPanel(
+      'paper',
+      pickLanguageText(
+        language,
+        ['论文常用命令：', '- /paper', '- /paperorganize', '- /paperbrainstorm <问题>', '- /papermode organize|brainstorm cot|tot|got', '- /paperadd <arXiv链接|编号|标题关键词>'].join('\n'),
+        ['Paper commands:', '- /paper', '- /paperorganize', '- /paperbrainstorm <question>', '- /papermode organize|brainstorm cot|tot|got', '- /paperadd <arXiv link|id|title keywords>'].join('\n')
+      )
+    );
+    return;
+  }
+
+  if (data === 'paper:history' || data.startsWith('paper:history:page:')) {
+    const requestedPage = data.startsWith('paper:history:page:') ? parsePageFromCallback(data, 'paper:history:page:') : 0;
+    const recent = papers.listRecent(chatId, topic, 30);
     if (recent.length === 0) {
       await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '没有历史论文', 'No paper history'));
-      await sendChunks(
-        telegram,
-        chatId,
-        pickLanguageText(language, '当前没有历史论文，先上传 PDF 或 /paperadd 检索。', 'No history yet. Upload a PDF or use /paperadd first.')
-      );
+      await renderPanel('paper', pickLanguageText(language, '当前没有历史论文，先上传 PDF 或 /paperadd 检索。', 'No history yet. Upload a PDF or use /paperadd first.'));
       return;
     }
 
     saveCandidates(store, chatId, topic, PAPER_RECENT_RESULTS_KEY, recent);
-    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已加载历史论文', 'History loaded'));
-    const lines = recent.map((item, index) => `${index + 1}. ${item.title} (${item.category})`).join('\n');
-    await telegram.sendMessage(
-      chatId,
-      pickLanguageText(language, `历史论文（点击按钮激活）：\n${lines}`, `Recent papers (click to activate):\n${lines}`),
-      buildRecentPaperKeyboard(recent, language)
+    const pagination = paginateItems(recent, requestedPage, PAPER_LIST_PAGE_SIZE);
+    await telegram.answerCallbackQuery(
+      callbackQuery.id,
+      data === 'paper:history'
+        ? pickLanguageText(language, '已加载历史论文', 'History loaded')
+        : pickLanguageText(language, `第 ${pagination.page + 1}/${pagination.totalPages} 页`, `Page ${pagination.page + 1}/${pagination.totalPages}`)
+    );
+    const lines = pagination.pageItems.map((item, index) => `${pagination.startIndex + index + 1}. ${item.title} (${item.category})`).join('\n');
+    await renderPanel(
+      'paper',
+      pickLanguageText(
+        language,
+        `历史论文（第 ${pagination.page + 1}/${pagination.totalPages} 页，点击按钮激活）：\n${lines}`,
+        `Recent papers (page ${pagination.page + 1}/${pagination.totalPages}, click to activate):\n${lines}`
+      ),
+      buildRecentPaperKeyboard(recent, language, pagination.page, PAPER_LIST_PAGE_SIZE)
+    );
+    return;
+  }
+
+  if (data.startsWith('paper:pick:page:')) {
+    const requestedPage = parsePageFromCallback(data, 'paper:pick:page:');
+    const candidates = readCandidates<ArxivCandidate>(store, chatId, topic, PAPER_SEARCH_RESULTS_KEY);
+    if (candidates.length === 0) {
+      await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '候选已失效，请重新检索', 'Candidates expired, please search again'));
+      await renderPanel('paper', pickLanguageText(language, '候选列表已失效，请重新执行 /paperadd。', 'Candidate list expired. Please run /paperadd again.'));
+      return;
+    }
+
+    const pagination = paginateItems(candidates, requestedPage, 5);
+    const lines = pagination.pageItems.map((item, index) => `${pagination.startIndex + index + 1}. ${item.title} (${item.id})`).join('\n');
+    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, `第 ${pagination.page + 1}/${pagination.totalPages} 页`, `Page ${pagination.page + 1}/${pagination.totalPages}`));
+    await renderPanel(
+      'paper',
+      pickLanguageText(
+        language,
+        `检索候选（第 ${pagination.page + 1}/${pagination.totalPages} 页，点击按钮导入）：\n${lines}`,
+        `Candidates (page ${pagination.page + 1}/${pagination.totalPages}, click to import):\n${lines}`
+      ),
+      buildArxivPickKeyboard(candidates, language, pagination.page, 5)
     );
     return;
   }
@@ -1672,9 +1796,8 @@ async function handleCallbackQuery(
     try {
       const profile = store.getCurrentProfile(chatId, topic);
       const record = await ingestPaperFromArxiv(papers, store, chatId, topic, profile.agent, selected.id, selected.title);
-      await sendChunks(
-        telegram,
-        chatId,
+      await renderPanel(
+        'paper',
         pickLanguageText(
           language,
           [`论文已入库：${record.title}`, `分类：${record.category}`, `摘要：${record.summary.slice(0, 1000)}`, '可继续提问：/ask 你的问题'].join('\n'),
@@ -1683,7 +1806,7 @@ async function handleCallbackQuery(
       );
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
-      await sendChunks(telegram, chatId, pickLanguageText(language, `导入候选论文失败：${messageText}`, `Candidate import failed: ${messageText}`));
+      await renderPanel('paper', pickLanguageText(language, `导入候选论文失败：${messageText}`, `Candidate import failed: ${messageText}`));
     }
     return;
   }
@@ -1699,9 +1822,8 @@ async function handleCallbackQuery(
 
     store.setTopicState(chatId, topic, 'active_paper_path', selected.pdfPath);
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已切换当前论文', 'Current paper switched'));
-    await sendChunks(
-      telegram,
-      chatId,
+    await renderPanel(
+      'paper',
       pickLanguageText(language, `已切换当前论文：${selected.title}\n可继续使用 /paper 或 /ask 提问。`, `Current paper switched: ${selected.title}\nContinue with /paper or /ask.`)
     );
     return;
@@ -1710,9 +1832,8 @@ async function handleCallbackQuery(
   if (data === 'paper:brainstorm') {
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '请发送你的讨论问题', 'Please send your discussion question'));
     const currentMode = getPaperMode(store, chatId, topic, 'brainstorm').toUpperCase();
-    await sendChunks(
-      telegram,
-      chatId,
+    await renderPanel(
+      'paper',
       pickLanguageText(
         language,
         [`请发送：/paperbrainstorm 你的问题`, `当前头脑风暴模式：${currentMode}`, '可改模式：/papermode brainstorm cot|tot|got'].join('\n'),
@@ -1722,14 +1843,14 @@ async function handleCallbackQuery(
     return;
   }
 
-  if (data === 'dev:projects') {
+  if (data === 'dev:projects' || data.startsWith('dev:projects:page:')) {
+    const requestedPage = data.startsWith('dev:projects:page:') ? parsePageFromCallback(data, 'dev:projects:page:') : 0;
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '正在读取项目列表', 'Loading projects'));
     const root = getDevWorkspaceRoot(store, config, chatId, topic);
-    const projects = devWorkspace.listProjects(root).slice(0, 20);
+    const projects = devWorkspace.listProjects(root);
     if (projects.length === 0) {
-      await sendChunks(
-        telegram,
-        chatId,
+      await renderPanel(
+        'dev',
         pickLanguageText(
           language,
           `当前没有项目。\n工作空间：${root}\n可用 /devcreate <项目名> 或 /devclone <仓库URL>。`,
@@ -1738,15 +1859,17 @@ async function handleCallbackQuery(
       );
       return;
     }
-    const lines = projects.map((item, index) => `${index + 1}. ${item.name}${item.isGitRepo ? ' (git)' : ''}`);
-    await sendChunks(
-      telegram,
-      chatId,
+
+    const pagination = paginateItems(projects, requestedPage, DEV_PROJECT_PAGE_SIZE);
+    const lines = pagination.pageItems.map((item, index) => `${pagination.startIndex + index + 1}. ${item.name}${item.isGitRepo ? ' (git)' : ''}`);
+    await renderPanel(
+      'dev',
       pickLanguageText(
         language,
-        [`工作空间：${root}`, '项目列表：', ...lines, '使用 /devselect <项目名> 选择当前项目。'].join('\n'),
-        [`Workspace: ${root}`, 'Projects:', ...lines, 'Use /devselect <project-name> to select current project.'].join('\n')
-      )
+        [`工作空间：${root}`, `项目列表（第 ${pagination.page + 1}/${pagination.totalPages} 页）：`, ...lines, '使用 /devselect <项目名> 选择当前项目。'].join('\n'),
+        [`Workspace: ${root}`, `Projects (page ${pagination.page + 1}/${pagination.totalPages}):`, ...lines, 'Use /devselect <project-name> to select current project.'].join('\n')
+      ),
+      buildDevProjectsKeyboard(language, pagination.page, pagination.totalPages)
     );
     return;
   }
@@ -1754,10 +1877,9 @@ async function handleCallbackQuery(
   if (data === 'dev:status') {
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已加载开发状态', 'Development status loaded'));
     const root = getDevWorkspaceRoot(store, config, chatId, topic);
-    const current = getDevCurrentProject(store, chatId, topic) ?? '未设置';
-    await sendChunks(
-      telegram,
-      chatId,
+    const current = getDevCurrentProject(store, chatId, topic) ?? pickLanguageText(language, '未设置', 'Not set');
+    await renderPanel(
+      'dev',
       pickLanguageText(language, ['开发模式状态：', `- 工作空间：${root}`, `- 当前项目：${current}`].join('\n'), ['Development mode status:', `- Workspace: ${root}`, `- Current project: ${current}`].join('\n'))
     );
     return;
@@ -1765,22 +1887,34 @@ async function handleCallbackQuery(
 
   if (data === 'dev:create') {
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '请输入项目名', 'Please enter project name'));
-    await sendChunks(telegram, chatId, pickLanguageText(language, '请发送：/devcreate <项目名>', 'Send: /devcreate <project-name>'));
+    await renderPanel('dev', pickLanguageText(language, '请发送：/devcreate <项目名>', 'Send: /devcreate <project-name>'));
     return;
   }
 
   if (data === 'dev:clone') {
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '请输入仓库地址', 'Please enter repository URL'));
-    await sendChunks(telegram, chatId, pickLanguageText(language, '请发送：/devclone <仓库URL> [项目名]', 'Send: /devclone <repo-url> [project-name]'));
+    await renderPanel('dev', pickLanguageText(language, '请发送：/devclone <仓库URL> [项目名]', 'Send: /devclone <repo-url> [project-name]'));
+    return;
+  }
+
+  if (data === 'dev:help') {
+    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已打开开发帮助', 'Development help opened'));
+    await renderPanel(
+      'dev',
+      pickLanguageText(
+        language,
+        ['开发常用命令：', '- /devworkspace <目录>', '- /devls', '- /devselect <项目名>', '- /devcat <相对路径>', '- /devrun <命令>', '- /devgit <args>'].join('\n'),
+        ['Development commands:', '- /devworkspace <path>', '- /devls', '- /devselect <project-name>', '- /devcat <relative-path>', '- /devrun <command>', '- /devgit <args>'].join('\n')
+      )
+    );
     return;
   }
 
   if (data === 'paper:organize') {
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '开始整理论文信息', 'Starting paper organization'));
     const currentMode = getPaperMode(store, chatId, topic, 'organize').toUpperCase();
-    await sendChunks(
-      telegram,
-      chatId,
+    await renderPanel(
+      'paper',
       pickLanguageText(
         language,
         [`请发送：/paperorganize`, `当前整理模式：${currentMode}`, '可改模式：/papermode organize cot|tot|got'].join('\n'),

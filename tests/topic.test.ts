@@ -65,8 +65,18 @@ describe('parseTelegramText', () => {
     expect(result.text).toContain('https://github.com/duncanhovsky/dialogue-research');
   });
 
+  it('parses start command with bot mention and payload', () => {
+    const result = parseTelegramText('/start@dialogue_research_bot abcd1234', config);
+    expect(result.command).toBe('start');
+  });
+
   it('parses menu command', () => {
     const result = parseTelegramText('/menu', config);
+    expect(result.command).toBe('menu');
+  });
+
+  it('parses menu command with bot mention', () => {
+    const result = parseTelegramText('/menu@dialogue_research_bot', config);
     expect(result.command).toBe('menu');
   });
 
