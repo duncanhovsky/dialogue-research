@@ -71,6 +71,29 @@ npm run start:daemon
 
 3. 守护进程会持续监听 Telegram 指令。
 
+## 开机自启与结束工作指令（Windows）
+
+1. 首次执行（先构建）：
+
+```powershell
+npm run build
+npm run daemon:autostart
+```
+
+2. 这会创建并启动计划任务 `TelegramCopilotBridgeDaemon`，在用户登录时自动启动。
+
+3. 结束工作（停止并禁用自启）：
+
+```powershell
+npm run daemon:stop
+```
+
+4. 仅临时手动启动（不改计划任务）：
+
+```powershell
+npm run daemon:start
+```
+
 ## 配置项说明
 
 - `TELEGRAM_BOT_TOKEN`：必填，Telegram Bot token
@@ -126,6 +149,7 @@ npm run start:daemon
 ## 持续运行与 Copilot Token 消耗控制
 
 - 持续监听：使用 `start:daemon` 长轮询 Telegram，等待过程不调用 Copilot 模型。
+- 可选开机自启：使用 `daemon:autostart` 注册计划任务，`daemon:stop` 一键停止并禁用。
 - 低消耗命令本地处理：`/start`、`/models`、`/model`、`/topic`、`/agent`、`/history`。
 - 按需调用 Copilot：仅当你在 VS Code Copilot Chat 中执行 `/telegram-copilot-bridge` 时才会消耗 Copilot Token。
 - 推荐生产策略：默认守护进程待机 + 人工触发 Copilot 回复，避免无效模型调用。

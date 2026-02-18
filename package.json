@@ -12,6 +12,9 @@
     "start:daemon": "node dist/daemon.js",
     "dev": "tsx src/index.ts",
     "dev:daemon": "tsx src/daemon.ts",
+    "daemon:autostart": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-autostart.ps1",
+    "daemon:start": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/daemon-run.ps1",
+    "daemon:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/stop-daemon.ps1",
     "test": "vitest run",
     "test:watch": "vitest"
   },
