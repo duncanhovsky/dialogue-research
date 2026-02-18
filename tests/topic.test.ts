@@ -112,6 +112,11 @@ describe('parseTelegramText', () => {
     expect(result.command).toBe('paper');
   });
 
+  it('parses paperhelp command', () => {
+    const result = parseTelegramText('/paperhelp', config);
+    expect(result.command).toBe('paperhelp');
+  });
+
   it('parses paperadd command', () => {
     const result = parseTelegramText('/paperadd https://arxiv.org/abs/1706.03762', config);
     expect(result.command).toBe('paperadd');
@@ -176,6 +181,11 @@ describe('parseTelegramText', () => {
   it('parses devstatus command', () => {
     const result = parseTelegramText('/devstatus', config);
     expect(result.command).toBe('devstatus');
+  });
+
+  it('parses devhelp command', () => {
+    const result = parseTelegramText('/devhelp', config);
+    expect(result.command).toBe('devhelp');
   });
 
   it('parses devls command', () => {

@@ -96,6 +96,7 @@ Recommended first step:
 - `/language <zh|en>` or `/lang <zh|en>` set interaction language for current topic
 - `/history <keyword>` search history
 - `/paper` show current paper
+- `/paperhelp` show paper-mode command guide
 - `/paperadd <arXiv-link|arXiv-id|paper-title>` add paper
 - `/paperlist` list/select recent papers
 - `/papermode <organize|brainstorm> <cot|tot|got>` set paper reasoning mode
@@ -112,6 +113,7 @@ Development mode commands:
 - `/devselect <project-name>` select current project
 - `/devclone <repo-url> [project-name]` clone and set current
 - `/devstatus` show dev mode state
+- `/devhelp` show development-mode command guide
 - `/devls [dir]` list files in current project
 - `/devcat <file-path>` read file from current project
 - `/devrun <command>` run whitelisted command (`git status|branch|log`, `npm/pnpm/yarn test`)
@@ -122,6 +124,12 @@ Language behavior:
 - `zh` => bot system messages and model outputs follow Chinese
 - `en` => bot system messages and model outputs follow English
 - language setting is stored per `chat_id + topic`
+
+Guidance hierarchy:
+
+- Global guidance is kept concise in `/start`.
+- Paper-specific guidance is concentrated in `/paperhelp` and appears after entering paper mode.
+- Development-specific guidance is concentrated in `/devhelp` and appears after entering development mode.
 
 ## Verification
 

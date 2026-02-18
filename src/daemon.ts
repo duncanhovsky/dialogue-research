@@ -646,6 +646,37 @@ async function handleMessage(
     return;
   }
 
+  if (parsed.command === 'paperhelp') {
+    await sendChunks(
+      telegram,
+      chatId,
+      localize(
+        store,
+        chatId,
+        parsed.topic,
+        [
+          '📚 论文模式指南',
+          '- 添加论文：发送 PDF 或 /paperadd <arXiv链接|编号|标题>',
+          '- 论文状态：/paper 与 /paperlist',
+          '- 论文整理：/paperorganize [cot|tot|got]',
+          '- 论文讨论：/paperbrainstorm [--mode cot|tot|got] <问题>',
+          '- 模式设置：/papermode <organize|brainstorm> <cot|tot|got>',
+          '- 问答：/ask <问题> 或 /askm <model-id> <问题>'
+        ].join('\n'),
+        [
+          '📚 Paper Mode Guide',
+          '- Add paper: send PDF or /paperadd <arXiv-link|id|title>',
+          '- Paper status: /paper and /paperlist',
+          '- Paper organizing: /paperorganize [cot|tot|got]',
+          '- Paper discussion: /paperbrainstorm [--mode cot|tot|got] <question>',
+          '- Mode config: /papermode <organize|brainstorm> <cot|tot|got>',
+          '- QA: /ask <question> or /askm <model-id> <question>'
+        ].join('\n')
+      )
+    );
+    return;
+  }
+
   if (parsed.command === 'devworkspace') {
     const workspacePath = (parsed.workspacePath ?? '').trim();
     if (!workspacePath) {
@@ -848,6 +879,35 @@ async function handleMessage(
         '- Project operations: /devls [dir] /devcat <file> /devrun <command> /devgit [status|branch|log]'
       ].join('\n')
     ));
+    return;
+  }
+
+  if (parsed.command === 'devhelp') {
+    await sendChunks(
+      telegram,
+      chatId,
+      localize(
+        store,
+        chatId,
+        parsed.topic,
+        [
+          '💻 开发模式指南',
+          '- 工作空间：/devworkspace <路径>',
+          '- 项目管理：/devprojects /devcreate /devselect /devclone /devstatus',
+          '- 项目浏览：/devls [目录] /devcat <文件路径>',
+          '- 命令执行：/devrun <命令>（白名单）',
+          '- Git 快捷：/devgit [status|branch|log]'
+        ].join('\n'),
+        [
+          '💻 Development Mode Guide',
+          '- Workspace: /devworkspace <path>',
+          '- Project management: /devprojects /devcreate /devselect /devclone /devstatus',
+          '- Project browsing: /devls [dir] /devcat <file-path>',
+          '- Command execution: /devrun <command> (whitelist only)',
+          '- Git shortcut: /devgit [status|branch|log]'
+        ].join('\n')
+      )
+    );
     return;
   }
 
@@ -1510,11 +1570,11 @@ async function handleCallbackQuery(
         language,
         [
           '已进入论文模式。',
-          '可用：发送 PDF、/paperadd <arXiv链接/论文名>、/paperlist、/paper、/ask、/askm。'
+          '论文相关操作请使用：/paperhelp（获取完整论文功能指引）。'
         ].join('\n'),
         [
           'Paper mode enabled.',
-          'Available: send PDF, /paperadd <arXiv link/title>, /paperlist, /paper, /ask, /askm.'
+          'For paper-specific operations, run /paperhelp for the full guide.'
         ].join('\n')
       )
     );
@@ -1536,15 +1596,13 @@ async function handleCallbackQuery(
         language,
         [
           '已进入开发模式。',
-          '可用：/devworkspace /devprojects /devcreate /devselect /devclone /devstatus。',
-          '项目内操作：/devls /devcat /devrun /devgit。',
+          '开发相关操作请使用：/devhelp（获取完整开发功能指引）。',
           `首次建议先执行：/devworkspace ${getDevWorkspaceRoot(store, config, chatId, topic)}`,
           '也可直接发送开发需求，继续对话式开发。'
         ].join('\n'),
         [
           'Development mode enabled.',
-          'Available: /devworkspace /devprojects /devcreate /devselect /devclone /devstatus.',
-          'Project operations: /devls /devcat /devrun /devgit.',
+          'For development-specific operations, run /devhelp for the full guide.',
           `Recommended first step: /devworkspace ${getDevWorkspaceRoot(store, config, chatId, topic)}`,
           'You can also send coding requests directly for conversational development.'
         ].join('\n')

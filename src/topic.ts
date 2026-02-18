@@ -14,6 +14,7 @@ const MODEL_RE = /^\/model\s+([\w\-.]{1,64})$/i;
 const ASKM_RE = /^\/askm\s+([\w\-.]{1,64})\s+(.+)$/i;
 const ASK_RE = /^\/ask(?:\s+--model\s+([\w\-.]{1,64}))?\s+(.+)$/i;
 const PAPER_RE = /^\/paper(?:\s+(current))?$/i;
+const PAPERHELP_RE = /^\/paperhelp$/i;
 const PAPERADD_RE = /^\/paperadd\s+(.+)$/i;
 const PAPERLIST_RE = /^\/paperlist$/i;
 const PAPERORGANIZE_RE = /^\/paperorganize(?:\s+(cot|tot|got))?$/i;
@@ -25,6 +26,7 @@ const DEVCREATE_RE = /^\/devcreate\s+([\w\-.]{1,80})$/i;
 const DEVSELECT_RE = /^\/devselect\s+([\w\-.]{1,80})$/i;
 const DEVCLONE_RE = /^\/devclone\s+(https?:\/\/\S+)(?:\s+([\w\-.]{1,80}))?$/i;
 const DEVSTATUS_RE = /^\/devstatus$/i;
+const DEVHELP_RE = /^\/devhelp$/i;
 const DEVLS_RE = /^\/devls(?:\s+(.+))?$/i;
 const DEVCAT_RE = /^\/devcat\s+(.+)$/i;
 const DEVRUN_RE = /^\/devrun\s+(.+)$/i;
@@ -50,6 +52,7 @@ export interface ParsedMessage {
     | 'model'
     | 'ask'
     | 'paper'
+    | 'paperhelp'
     | 'paperadd'
     | 'paperlist'
     | 'paperorganize'
@@ -61,6 +64,7 @@ export interface ParsedMessage {
     | 'devselect'
     | 'devclone'
     | 'devstatus'
+    | 'devhelp'
     | 'devls'
     | 'devcat'
     | 'devrun'
@@ -201,6 +205,16 @@ export function parseTelegramText(
     };
   }
 
+  if (PAPERHELP_RE.test(raw)) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'paperhelp',
+      text: 'Paper help requested'
+    };
+  }
+
   const paperAddMatch = raw.match(PAPERADD_RE);
   if (paperAddMatch) {
     return {
@@ -330,6 +344,16 @@ export function parseTelegramText(
     };
   }
 
+  if (DEVHELP_RE.test(raw)) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'devhelp',
+      text: 'Dev help requested'
+    };
+  }
+
   const devLsMatch = raw.match(DEVLS_RE);
   if (devLsMatch) {
     return {
@@ -415,21 +439,21 @@ function buildWelcomeMessage(repoUrl: string, devWorkspaceRoot: string, language
     [
       '欢迎使用 Dialogue-Research。',
       'Dialogue-Research = 对话式科研（论文研究 + 开发协作）。',
-      '你可以在 Telegram 中直接与 Copilot 对话，并支持历史续聊、智能体切换、模型选择与 PDF 论文分析。',
+      '你可以在 Telegram 中直接与 Copilot 对话，并支持历史续聊、智能体切换与模型选择。',
       `首次建议先配置开发工作空间：/devworkspace ${devWorkspaceRoot}`,
       '语言设置：/language zh 或 /language en（简写：/lang zh|en）',
-      '常用命令：/start /menu /topic /agent /models /modelsync /model /history /mode /paper /paperadd /paperlist /paperorganize /paperbrainstorm /papermode /devworkspace /devprojects /devcreate /devselect /devclone /devstatus /devls /devcat /devrun /devgit /ask /askm',
-      '论文问答可临时指定模型：/ask --model <model-id> <问题>（简写：/askm <model-id> <问题>）',
+      '全局命令：/start /menu /topic /agent /models /modelsync /model /history /mode /language',
+      '模式命令请使用：/paperhelp 和 /devhelp（进入对应模式后也会自动提示）。',
       `GitHub 仓库：${repoUrl}`
     ].join('\n'),
     [
       'Welcome to Dialogue-Research.',
       'Dialogue-Research = conversational research for papers and development workflows.',
-      'You can chat with Copilot in Telegram with history continuation, agent/model selection, and PDF paper analysis.',
+      'You can chat with Copilot in Telegram with history continuation, agent/model selection, and guided mode workflows.',
       `Recommended first step: /devworkspace ${devWorkspaceRoot}`,
       'Language setting: /language zh or /language en (short: /lang zh|en)',
-      'Common commands: /start /menu /topic /agent /models /modelsync /model /history /mode /paper /paperadd /paperlist /paperorganize /paperbrainstorm /papermode /devworkspace /devprojects /devcreate /devselect /devclone /devstatus /devls /devcat /devrun /devgit /ask /askm',
-      'Temporary model override for paper QA: /ask --model <model-id> <question> (short: /askm <model-id> <question>)',
+      'Global commands: /start /menu /topic /agent /models /modelsync /model /history /mode /language',
+      'Mode-specific guides: /paperhelp and /devhelp (also shown after entering each mode).',
       `GitHub repo: ${repoUrl}`
     ].join('\n')
   );
