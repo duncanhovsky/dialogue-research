@@ -109,28 +109,6 @@ npm run test
 npm run dev
 ```
 
-## GitHub 开源发布（你的账户）
-
-如果你本地已登录 GitHub CLI：
-
-```powershell
-git init
-git add .
-git commit -m "feat: telegram copilot bridge skill with mcp"
-gh repo create telegram-copilot-bridge-skill --public --source . --remote origin --push
-```
-
-如果你使用已有远程仓库：
-
-```powershell
-git init
-git add .
-git commit -m "feat: telegram copilot bridge skill with mcp"
-git branch -M main
-git remote add origin <your-repo-url>
-git push -u origin main
-```
-
 ## 限制与说明
 
 - 本项目通过 Skill + MCP 提供桥接能力，不直接调用私有 Copilot 后端 API。
