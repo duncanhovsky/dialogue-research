@@ -91,7 +91,7 @@ export class SessionStore {
         SELECT id, chat_id as chatId, topic, role, content, agent, created_at as createdAt
         FROM session_messages
         WHERE chat_id = ? AND topic = ?
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, id DESC
         LIMIT ?
       `)
       .all(query.chatId, topic, limit) as SessionMessage[];
@@ -111,7 +111,7 @@ export class SessionStore {
         SELECT id, chat_id as chatId, topic, role, content, agent, created_at as createdAt
         FROM session_messages
         WHERE chat_id = ? AND content LIKE ?
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, id DESC
         LIMIT ?
       `)
       .all(query.chatId, `%${query.keyword}%`, limit) as SessionMessage[];
@@ -122,12 +122,14 @@ export class SessionStore {
   continueContext(chatId: number, topic: string, limit = 20): ContinueContextResult {
     const messages = this.getHistory({ chatId, topic, limit });
     const agent = messages.length > 0 ? messages[messages.length - 1].agent : this.config.defaultAgent;
+    const modelId = this.getSelectedModel(chatId, topic);
     const summary = this.summarize(messages);
 
     return {
       chatId,
       topic,
       agent,
+      modelId,
       messages,
       summary
     };
@@ -173,6 +175,28 @@ export class SessionStore {
     return offset;
   }
 
+  getSelectedModel(chatId: number, topic: string): string {
+    const row = this.db
+      .prepare('SELECT value FROM bridge_state WHERE key = ? LIMIT 1')
+      .get(this.makeTopicKey(chatId, topic, 'selected_model')) as { value: string } | undefined;
+
+    return row?.value ?? this.config.defaultModel;
+  }
+
+  setSelectedModel(chatId: number, topic: string, modelId: string): string {
+    const now = Date.now();
+    this.db
+      .prepare(`
+        INSERT INTO bridge_state (key, value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key)
+        DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+      `)
+      .run(this.makeTopicKey(chatId, topic, 'selected_model'), modelId, now);
+
+    return modelId;
+  }
+
   private summarize(messages: SessionMessage[]): string {
     if (messages.length === 0) {
       return 'No previous context.';
@@ -204,5 +228,9 @@ export class SessionStore {
   private pruneByTime(): void {
     const cutoff = Date.now() - this.config.sessionRetentionDays * 24 * 60 * 60 * 1000;
     this.db.prepare('DELETE FROM session_messages WHERE created_at < ?').run(cutoff);
+  }
+
+  private makeTopicKey(chatId: number, topic: string, key: string): string {
+    return `${key}:${chatId}:${topic}`;
   }
 }

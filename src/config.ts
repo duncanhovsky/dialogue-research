@@ -38,6 +38,9 @@ export function loadConfig(): AppConfig {
     sessionRetentionMessages: asNumber('SESSION_RETENTION_MESSAGES', 200),
     dbPath: process.env.DB_PATH ?? './data/sessions.sqlite',
     defaultTopic: process.env.DEFAULT_TOPIC ?? 'default',
-    defaultAgent: process.env.DEFAULT_AGENT ?? 'default'
+    defaultAgent: process.env.DEFAULT_AGENT ?? 'default',
+    defaultModel: process.env.DEFAULT_MODEL ?? 'gpt-5.3-codex',
+    modelCatalogPath: process.env.MODEL_CATALOG_PATH ?? './config/models.catalog.json',
+    githubRepoUrl: process.env.GITHUB_REPO_URL ?? 'https://github.com/duncanhovsky/telegram-copilot-bridge-skill'
   };
 }

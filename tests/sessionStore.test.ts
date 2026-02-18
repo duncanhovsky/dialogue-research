@@ -17,7 +17,10 @@ function makeStore(): SessionStore {
     sessionRetentionMessages: 200,
     dbPath: path.join(os.tmpdir(), `telegram-copilot-test-${Date.now()}-${Math.random()}.sqlite`),
     defaultTopic: 'default',
-    defaultAgent: 'default'
+    defaultAgent: 'default',
+    defaultModel: 'gpt-5.3-codex',
+    modelCatalogPath: './config/models.catalog.json',
+    githubRepoUrl: 'https://github.com/duncanhovsky/telegram-copilot-bridge-skill'
   };
 
   const store = new SessionStore(config);
@@ -65,10 +68,19 @@ describe('SessionStore', () => {
     const store = makeStore();
     store.append({ chatId: 3, topic: 'default', role: 'user', content: 'first', agent: 'agent-a' });
     store.append({ chatId: 3, topic: 'default', role: 'assistant', content: 'second', agent: 'agent-a' });
+    store.setSelectedModel(3, 'default', 'claude-sonnet-4.5');
 
     const context = store.continueContext(3, 'default', 10);
     expect(context.agent).toBe('agent-a');
+    expect(context.modelId).toBe('claude-sonnet-4.5');
     expect(context.messages.length).toBe(2);
     expect(context.summary).toContain('user: first');
+  });
+
+  it('stores and reads selected model', () => {
+    const store = makeStore();
+    expect(store.getSelectedModel(4, 'research')).toBe('gpt-5.3-codex');
+    store.setSelectedModel(4, 'research', 'gemini-2.5-pro');
+    expect(store.getSelectedModel(4, 'research')).toBe('gemini-2.5-pro');
   });
 });

@@ -1,7 +1,7 @@
 ---
 name: telegram-copilot-bridge
-description: 'Bridge Telegram bot conversations to VS Code Copilot using MCP tools. Use when you need to receive Telegram messages, continue chat history by chat_id and topic, choose or switch Copilot agent profile, and send Copilot replies back to Telegram.'
-argument-hint: 'mode=<manual|auto> chat_id=<id> topic=<name> agent=<profile> action=<sync|history|continue|reply>'
+description: 'Bridge Telegram bot conversations to VS Code Copilot using MCP tools. Use when you need to receive Telegram messages, continue chat history by chat_id and topic, choose or switch Copilot agent profile and model, show model pricing notes, and send Copilot replies back to Telegram.'
+argument-hint: 'mode=<manual|auto> chat_id=<id> topic=<name> agent=<profile> model=<id> action=<sync|history|continue|reply>'
 user-invocable: true
 disable-model-invocation: false
 ---
@@ -15,6 +15,9 @@ Use this skill to operate a Telegram bot as a conversation channel for VS Code C
 - `/topic <name>`: switch or create a topic under current `chat_id`.
 - `/agent <profile>`: switch Copilot agent profile for current topic.
 - `/history <keyword>`: query history (handled by this skill with `session.search`).
+- `/models`: show available Copilot models and pricing notes.
+- `/model <id>`: select model for current topic.
+- `/start`: show welcome message and repository link.
 
 ## Required MCP tools
 
@@ -26,14 +29,21 @@ Use this skill to operate a Telegram bot as a conversation channel for VS Code C
 - `session.list_threads`
 - `session.continue`
 - `bridge.prepare_message`
+- `bridge.get_start_message`
 - `bridge.get_offset`
 - `bridge.set_offset`
+- `copilot.list_models`
+- `copilot.select_model`
+- `copilot.get_selected_model`
 
 ## Procedure
 
 1. Read last offset using `bridge.get_offset`, then fetch latest updates using `telegram.fetch_updates`.
 2. For each update message:
    - Call `bridge.prepare_message` with `chatId`, `text`, and optional `topic`.
+   - If command is `/start`, return `bridge.get_start_message` and send via `telegram.send_message`.
+   - If command is `/models`, call `copilot.list_models` and send the model list with pricing notes.
+   - If command is `/model`, validate and persist through `copilot.select_model`, then send confirmation.
    - If command is `/topic` or `/agent`, persist by writing a system message through `session.append` and send confirmation via `telegram.send_message`.
    - Otherwise append user content with `session.append`.
 3. Build context:
@@ -54,6 +64,13 @@ Use this skill to operate a Telegram bot as a conversation channel for VS Code C
 - Keep default agent from environment `DEFAULT_AGENT`.
 - Override per topic with `/agent <profile>`.
 - Always persist selected profile in session messages for reproducible continuation.
+
+## Model selection and pricing
+
+- Use `copilot.list_models` to show currently configured model catalog with pricing notes.
+- Use `copilot.select_model` to bind model choice to `chat_id + topic`.
+- Use `copilot.get_selected_model` before generating replies to keep model continuity.
+- Treat pricing as informational notes and remind users that official billing may change.
 
 ## History and continuation
 

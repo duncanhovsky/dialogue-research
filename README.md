@@ -8,7 +8,9 @@
 - 会话持久化（默认 SQLite）
 - 历史查询与继续对话（按 `chat_id + topic`）
 - Copilot 智能体配置选择与切换（按 topic 维度）
+- 读取可用 Copilot 大模型列表，展示各模型收费说明，并支持按话题选择模型
 - 回复模式切换：`manual` / `auto`
+- Telegram `/start` 欢迎语（含技能介绍与 GitHub 仓库地址）
 - MCP 工具化接口，便于在 Copilot Chat 中编排
 
 ## 项目结构
@@ -57,6 +59,9 @@ npm run build
 - `SESSION_RETENTION_DAYS`：保留天数（默认 30）
 - `DEFAULT_TOPIC`：默认话题（默认 `default`）
 - `DEFAULT_AGENT`：默认智能体标识（默认 `default`）
+- `DEFAULT_MODEL`：默认模型 ID（默认 `gpt-5.3-codex`）
+- `MODEL_CATALOG_PATH`：模型目录文件路径（默认 `./config/models.catalog.json`）
+- `GITHUB_REPO_URL`：`/start` 欢迎语中展示的仓库地址
 
 ## Telegram 对话命令
 
@@ -64,6 +69,9 @@ npm run build
 - `/agent <profile>`：切换当前话题使用的 Copilot 智能体配置
 - `/history <keyword>`：触发历史查询流程
 - `/mode <manual|auto>`：切换回复模式
+- `/models`：显示可用模型及收费说明
+- `/model <id>`：为当前 `chat_id + topic` 选择模型
+- `/start`：显示欢迎语、功能说明和 GitHub 仓库地址
 
 ## MCP 工具接口
 
@@ -77,6 +85,10 @@ npm run build
 - `bridge.prepare_message`
 - `bridge.get_offset`
 - `bridge.set_offset`
+- `bridge.get_start_message`
+- `copilot.list_models`
+- `copilot.select_model`
+- `copilot.get_selected_model`
 
 ## 推荐编排流程（在 Skill 内）
 
@@ -85,10 +97,17 @@ npm run build
 3. 对每条消息调用 `bridge.prepare_message`
 4. 写入 `session.append`
 5. 用 `session.continue` 构建续聊上下文
-6. 由 Copilot 生成回复（使用当前 topic 的 agent）
-7. 回复写入 `session.append`
-8. 调用 `telegram.send_message` 回发
-9. 更新 `bridge.set_offset`
+6. 使用 `copilot.get_selected_model` 读取当前话题绑定模型
+7. 由 Copilot 生成回复（使用当前 topic 的 agent + model）
+8. 回复写入 `session.append`
+9. 调用 `telegram.send_message` 回发
+10. 更新 `bridge.set_offset`
+
+## 模型收费说明
+
+- 本项目通过 `config/models.catalog.json` 读取可用模型清单与收费说明。
+- 默认收费说明为“按 GitHub Copilot 订阅计划计费”，用于会话内展示。
+- 若你组织有更精确的内部结算规则，可直接更新 `config/models.catalog.json` 中每个模型的 `pricing` 字段。
 
 ## 安全建议
 

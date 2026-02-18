@@ -1,4 +1,5 @@
 import { loadConfig } from './config.js';
+import { ModelCatalog } from './modelCatalog.js';
 import { SessionStore } from './sessionStore.js';
 import { TelegramClient } from './telegram.js';
 import { parseTelegramText } from './topic.js';
@@ -122,6 +123,47 @@ const tools = [
     }
   },
   {
+    name: 'bridge.get_start_message',
+    description: 'Get standard /start welcome message with repository link',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
+  },
+  {
+    name: 'copilot.list_models',
+    description: 'List available Copilot models and pricing notes',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
+  },
+  {
+    name: 'copilot.select_model',
+    description: 'Select model for a chat_id + topic thread',
+    inputSchema: {
+      type: 'object',
+      required: ['chatId', 'topic', 'modelId'],
+      properties: {
+        chatId: { type: 'number' },
+        topic: { type: 'string' },
+        modelId: { type: 'string' }
+      }
+    }
+  },
+  {
+    name: 'copilot.get_selected_model',
+    description: 'Get selected model for a chat_id + topic thread',
+    inputSchema: {
+      type: 'object',
+      required: ['chatId', 'topic'],
+      properties: {
+        chatId: { type: 'number' },
+        topic: { type: 'string' }
+      }
+    }
+  },
+  {
     name: 'bridge.get_offset',
     description: 'Get last processed Telegram update offset',
     inputSchema: {
@@ -144,6 +186,7 @@ const tools = [
 
 export async function runMcpServer(): Promise<void> {
   const config = loadConfig();
+  const modelCatalog = new ModelCatalog(config.modelCatalogPath);
   const telegram = new TelegramClient(config);
   const sessions = new SessionStore(config);
 
@@ -180,7 +223,7 @@ export async function runMcpServer(): Promise<void> {
       inputBuffer = inputBuffer.slice(bodyEnd);
 
       const request = JSON.parse(body) as RpcRequest;
-      const response = await handleRequest(request, telegram, sessions, config.defaultAgent, config.defaultTopic);
+      const response = await handleRequest(request, telegram, sessions, modelCatalog, config);
       if (response) {
         writeResponse(response);
       }
@@ -197,8 +240,8 @@ async function handleRequest(
   request: RpcRequest,
   telegram: TelegramClient,
   sessions: SessionStore,
-  defaultAgent: string,
-  defaultTopic: string
+  modelCatalog: ModelCatalog,
+  config: ReturnType<typeof loadConfig>
 ): Promise<RpcResponse | null> {
   if (request.method === 'notifications/initialized') {
     return null;
@@ -234,7 +277,7 @@ async function handleRequest(
 
     if (request.method === 'tools/call') {
       const params = (request.params ?? {}) as { name: string; arguments?: Record<string, unknown> };
-      const result = await callTool(params.name, params.arguments ?? {}, telegram, sessions, defaultAgent, defaultTopic);
+      const result = await callTool(params.name, params.arguments ?? {}, telegram, sessions, modelCatalog, config);
       return {
         jsonrpc: '2.0',
         id: request.id ?? null,
@@ -270,8 +313,8 @@ async function callTool(
   args: Record<string, unknown>,
   telegram: TelegramClient,
   sessions: SessionStore,
-  defaultAgent: string,
-  defaultTopic: string
+  modelCatalog: ModelCatalog,
+  config: ReturnType<typeof loadConfig>
 ): Promise<unknown> {
   switch (name) {
     case 'telegram.fetch_updates': {
@@ -287,10 +330,10 @@ async function callTool(
     case 'session.append': {
       const result = sessions.append({
         chatId: Number(args.chatId),
-        topic: String(args.topic ?? defaultTopic),
+        topic: String(args.topic ?? config.defaultTopic),
         role: (args.role as 'user' | 'assistant' | 'system') ?? 'user',
         content: String(args.content ?? ''),
-        agent: String(args.agent ?? defaultAgent)
+        agent: String(args.agent ?? config.defaultAgent)
       });
       return result;
     }
@@ -315,15 +358,16 @@ async function callTool(
     case 'session.continue': {
       return sessions.continueContext(
         Number(args.chatId),
-        String(args.topic ?? defaultTopic),
+        String(args.topic ?? config.defaultTopic),
         args.limit ? Number(args.limit) : 20
       );
     }
     case 'bridge.prepare_message': {
       const chatId = Number(args.chatId);
-      const topic = args.topic ? String(args.topic) : defaultTopic;
+      const topic = args.topic ? String(args.topic) : config.defaultTopic;
       const mode = args.mode === 'auto' ? 'auto' : 'manual';
       const profile = sessions.getCurrentProfile(chatId, topic);
+      const selectedModel = sessions.getSelectedModel(chatId, topic);
       return parseTelegramText(String(args.text ?? ''), {
         telegramBotToken: 'hidden',
         telegramApiBase: 'hidden',
@@ -333,9 +377,44 @@ async function callTool(
         sessionRetentionDays: 30,
         sessionRetentionMessages: 200,
         dbPath: ':memory:',
-        defaultTopic,
-        defaultAgent
-      }, profile.topic, profile.agent);
+        defaultTopic: config.defaultTopic,
+        defaultAgent: config.defaultAgent,
+        defaultModel: config.defaultModel,
+        modelCatalogPath: config.modelCatalogPath,
+        githubRepoUrl: config.githubRepoUrl
+      }, profile.topic, profile.agent, selectedModel);
+    }
+    case 'bridge.get_start_message': {
+      return parseTelegramText('/start', config).text;
+    }
+    case 'copilot.list_models': {
+      return {
+        models: modelCatalog.list(),
+        note: '模型可用性与收费规则以你的 GitHub Copilot 订阅与官方页面为准。'
+      };
+    }
+    case 'copilot.select_model': {
+      const chatId = Number(args.chatId);
+      const topic = String(args.topic ?? config.defaultTopic);
+      const modelId = String(args.modelId ?? '').trim();
+      if (!modelCatalog.findById(modelId)) {
+        throw new Error(`Model not found in catalog: ${modelId}`);
+      }
+      return {
+        chatId,
+        topic,
+        modelId: sessions.setSelectedModel(chatId, topic, modelId)
+      };
+    }
+    case 'copilot.get_selected_model': {
+      const chatId = Number(args.chatId);
+      const topic = String(args.topic ?? config.defaultTopic);
+      const modelId = sessions.getSelectedModel(chatId, topic);
+      return {
+        chatId,
+        topic,
+        model: modelCatalog.findById(modelId) ?? { id: modelId, name: modelId, provider: 'unknown', pricing: '请查看官方价格页' }
+      };
     }
     case 'bridge.get_offset': {
       return { offset: sessions.getOffset() };

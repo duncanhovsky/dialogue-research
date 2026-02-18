@@ -11,6 +11,17 @@ export interface AppConfig {
   dbPath: string;
   defaultTopic: string;
   defaultAgent: string;
+  defaultModel: string;
+  modelCatalogPath: string;
+  githubRepoUrl: string;
+}
+
+export interface CopilotModelInfo {
+  id: string;
+  name: string;
+  provider: string;
+  pricing: string;
+  referenceUrl?: string;
 }
 
 export interface TelegramUpdate {
@@ -64,6 +75,7 @@ export interface ContinueContextResult {
   chatId: number;
   topic: string;
   agent: string;
+  modelId: string;
   messages: SessionMessage[];
   summary: string;
 }

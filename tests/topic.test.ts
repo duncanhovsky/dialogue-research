@@ -12,7 +12,10 @@ const config: AppConfig = {
   sessionRetentionMessages: 200,
   dbPath: ':memory:',
   defaultTopic: 'default',
-  defaultAgent: 'default'
+  defaultAgent: 'default',
+  defaultModel: 'gpt-5.3-codex',
+  modelCatalogPath: './config/models.catalog.json',
+  githubRepoUrl: 'https://github.com/duncanhovsky/telegram-copilot-bridge-skill'
 };
 
 describe('parseTelegramText', () => {
@@ -40,11 +43,25 @@ describe('parseTelegramText', () => {
     expect(result.mode).toBe('auto');
   });
 
+  it('parses model switch command', () => {
+    const result = parseTelegramText('/model claude-sonnet-4.5', config);
+    expect(result.command).toBe('model');
+    expect(result.modelId).toBe('claude-sonnet-4.5');
+  });
+
+  it('parses start command and returns welcome text', () => {
+    const result = parseTelegramText('/start', config);
+    expect(result.command).toBe('start');
+    expect(result.text).toContain('Telegram ↔ VS Code Copilot Bridge Skill');
+    expect(result.text).toContain('https://github.com/duncanhovsky/telegram-copilot-bridge-skill');
+  });
+
   it('returns plain text payload', () => {
     const result = parseTelegramText('hello world', config, 'ops', 'default');
     expect(result.command).toBeUndefined();
     expect(result.topic).toBe('ops');
     expect(result.agent).toBe('default');
+    expect(result.modelId).toBe('gpt-5.3-codex');
     expect(result.text).toBe('hello world');
   });
 });
