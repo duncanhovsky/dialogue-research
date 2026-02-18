@@ -51,6 +51,26 @@ npm run build
 
 5. 在 Copilot Chat 中通过 `/telegram-copilot-bridge` 调用技能
 
+## Telegram Bot Token 配置（本地 VS Code Copilot）
+
+推荐方式（MCP 输入变量）：
+
+1. 保持 `.vscode/mcp.json` 中 `TELEGRAM_BOT_TOKEN` 为 `${input:telegramBotToken}`。
+2. 启动 MCP 服务时，VS Code 会弹窗要求输入 Token。
+3. Token 仅保存在本地会话，不写入仓库文件。
+
+可选方式（守护进程）：
+
+1. 参考 `.env.example` 在本地环境注入 `TELEGRAM_BOT_TOKEN`。
+2. 运行守护进程：
+
+```powershell
+npm run build
+npm run start:daemon
+```
+
+3. 守护进程会持续监听 Telegram 指令。
+
 ## 配置项说明
 
 - `TELEGRAM_BOT_TOKEN`：必填，Telegram Bot token
@@ -102,6 +122,13 @@ npm run build
 8. 回复写入 `session.append`
 9. 调用 `telegram.send_message` 回发
 10. 更新 `bridge.set_offset`
+
+## 持续运行与 Copilot Token 消耗控制
+
+- 持续监听：使用 `start:daemon` 长轮询 Telegram，等待过程不调用 Copilot 模型。
+- 低消耗命令本地处理：`/start`、`/models`、`/model`、`/topic`、`/agent`、`/history`。
+- 按需调用 Copilot：仅当你在 VS Code Copilot Chat 中执行 `/telegram-copilot-bridge` 时才会消耗 Copilot Token。
+- 推荐生产策略：默认守护进程待机 + 人工触发 Copilot 回复，避免无效模型调用。
 
 ## 模型收费说明
 

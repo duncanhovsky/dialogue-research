@@ -9,7 +9,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "start:daemon": "node dist/daemon.js",
     "dev": "tsx src/index.ts",
+    "dev:daemon": "tsx src/daemon.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

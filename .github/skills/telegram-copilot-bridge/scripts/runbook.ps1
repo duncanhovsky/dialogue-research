@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('build','start','test')]
+  [ValidateSet('build','start','daemon','test')]
   [string]$Action = 'build'
 )
 
@@ -10,6 +10,9 @@ switch ($Action) {
   }
   'start' {
     npm run start
+  }
+  'daemon' {
+    npm run start:daemon
   }
   'test' {
     npm run test

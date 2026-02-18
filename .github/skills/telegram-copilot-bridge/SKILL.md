@@ -10,6 +10,14 @@ disable-model-invocation: false
 
 Use this skill to operate a Telegram bot as a conversation channel for VS Code Copilot.
 
+## Local token setup (VS Code)
+
+1. Open `.vscode/mcp.json` and keep `TELEGRAM_BOT_TOKEN` bound to `${input:telegramBotToken}`.
+2. Start MCP server in VS Code; input your Bot Token when prompted.
+3. Alternative: set token in local environment based on `.env.example` for daemon mode.
+
+Do not commit real token values into repository files.
+
 ## Commands in Telegram
 
 - `/topic <name>`: switch or create a topic under current `chat_id`.
@@ -52,6 +60,12 @@ Use this skill to operate a Telegram bot as a conversation channel for VS Code C
 4. Generate Copilot response using selected `agent` and context summary.
 5. Save assistant reply through `session.append` and send it via `telegram.send_message`.
 6. Persist next offset using `bridge.set_offset`.
+
+## Continuous running with minimal Copilot token consumption
+
+- Run local daemon `npm run start:daemon` to keep long-polling Telegram updates.
+- In daemon standby mode, waiting and command handling (`/start`, `/models`, `/model`, `/topic`, `/agent`, `/history`) are local and do not consume Copilot tokens.
+- Only invoke `/telegram-copilot-bridge` in Copilot Chat when you explicitly need model inference replies.
 
 ## Mode behavior
 
