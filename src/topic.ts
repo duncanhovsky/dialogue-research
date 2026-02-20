@@ -8,6 +8,7 @@ const MODE_RE = /^\/mode\s+(manual|auto)$/i;
 const START_RE = /^\/start(?:@[\w_]+)?(?:\s+\S+)?$/i;
 const LANGUAGE_RE = /^\/(?:language|lang)(?:\s+(.+))?$/i;
 const MENU_RE = /^\/menu(?:@[\w_]+)?$/i;
+const BACK_RE = /^\/back(?:@[\w_]+)?$/i;
 const MODELS_RE = /^\/models$/i;
 const MODELSYNC_RE = /^\/modelsync$/i;
 const MODEL_RE = /^\/model\s+([\w\-.]{1,64})$/i;
@@ -47,6 +48,7 @@ export interface ParsedMessage {
     | 'start'
     | 'language'
     | 'menu'
+    | 'back'
     | 'models'
     | 'modelsync'
     | 'model'
@@ -131,6 +133,16 @@ export function parseTelegramText(
       modelId,
       command: 'menu',
       text: 'Main menu requested'
+    };
+  }
+
+  if (BACK_RE.test(raw)) {
+    return {
+      topic,
+      agent,
+      modelId,
+      command: 'back',
+      text: 'Back requested'
     };
   }
 

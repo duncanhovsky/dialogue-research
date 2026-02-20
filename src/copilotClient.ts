@@ -56,6 +56,8 @@ export class CopilotClient {
 
   private readonly timeoutMs: number;
 
+  private readonly maxTotalWaitMs: number;
+
   private readonly usageLogPath: string;
 
   private readonly priceInputPer1M: number;
@@ -77,8 +79,9 @@ export class CopilotClient {
       this.apiKeySource = 'none';
     }
     this.maxRetries = this.asNumber('COPILOT_MAX_RETRIES', 3, 1, 8);
-    this.retryBaseMs = this.asNumber('COPILOT_RETRY_BASE_MS', 600, 100, 10000);
-    this.timeoutMs = this.asNumber('COPILOT_TIMEOUT_MS', 45000, 1000, 180000);
+    this.retryBaseMs = this.asNumber('COPILOT_RETRY_BASE_MS', 400, 100, 10000);
+    this.timeoutMs = this.asNumber('COPILOT_TIMEOUT_MS', 25000, 1000, 180000);
+    this.maxTotalWaitMs = this.asNumber('COPILOT_MAX_TOTAL_WAIT_MS', 70000, 5000, 300000);
     this.usageLogPath = process.env.COPILOT_USAGE_LOG_PATH ?? './data/copilot-usage.log';
     this.priceInputPer1M = this.asNumber('COPILOT_PRICE_INPUT_PER_1M', 0, 0, 1000);
     this.priceOutputPer1M = this.asNumber('COPILOT_PRICE_OUTPUT_PER_1M', 0, 0, 1000);
@@ -144,9 +147,16 @@ export class CopilotClient {
     let lastError = 'unknown error';
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt += 1) {
+      const elapsedBeforeAttempt = Date.now() - startedAt;
+      const remainingBudget = this.maxTotalWaitMs - elapsedBeforeAttempt;
+      if (remainingBudget <= 1500) {
+        lastError = `request timeout budget exceeded (${this.maxTotalWaitMs}ms)`;
+        break;
+      }
+
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+        const timeout = setTimeout(() => controller.abort(), Math.min(this.timeoutMs, remainingBudget));
 
         const response = await undiciFetch(this.endpoint, {
           method: 'POST',
@@ -171,6 +181,10 @@ export class CopilotClient {
           const maybeFatal = this.asNonRetryableAuthError(response.status, body);
           if (maybeFatal) {
             throw maybeFatal;
+          }
+          const maybeRequestFatal = this.asNonRetryableRequestError(response.status, body, modelId);
+          if (maybeRequestFatal) {
+            throw maybeRequestFatal;
           }
           throw new Error(`Copilot completion failed: ${response.status} ${body}`);
         }
@@ -200,13 +214,18 @@ export class CopilotClient {
         return text;
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
-        if (error instanceof Error && /缺少 models 权限/i.test(error.message)) {
+        if (error instanceof Error && /缺少 models 权限|non-retryable/i.test(error.message)) {
           break;
         }
         if (attempt >= this.maxRetries) {
           break;
         }
-        await this.sleep(this.retryBaseMs * 2 ** (attempt - 1));
+        const nextBackoff = this.retryBaseMs * 2 ** (attempt - 1);
+        const elapsedAfterAttempt = Date.now() - startedAt;
+        if (elapsedAfterAttempt + nextBackoff >= this.maxTotalWaitMs) {
+          break;
+        }
+        await this.sleep(nextBackoff);
       }
     }
 
@@ -361,6 +380,24 @@ export class CopilotClient {
           '也可以改用具备权限的端点：设置 COPILOT_CHAT_COMPLETIONS_URL 后重启 daemon。'
         ].join(' ')
       );
+    }
+
+    return null;
+  }
+
+  private asNonRetryableRequestError(status: number, body: string, modelId: string): Error | null {
+    const lowered = body.toLowerCase();
+
+    if (status === 400 || status === 404 || status === 422) {
+      if (lowered.includes('unknown_model') || lowered.includes('unknown model')) {
+        return new Error(`Copilot completion non-retryable: unknown model ${modelId}`);
+      }
+      if (lowered.includes('invalid_request') || lowered.includes('invalid request')) {
+        return new Error('Copilot completion non-retryable: invalid request');
+      }
+      if (lowered.includes('context_length') || lowered.includes('max context')) {
+        return new Error('Copilot completion non-retryable: context length exceeded');
+      }
     }
 
     return null;

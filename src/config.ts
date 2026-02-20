@@ -41,7 +41,7 @@ export function loadConfig(options?: LoadConfigOptions): AppConfig {
     noProxy: process.env.NO_PROXY,
     replyMode: asMode(process.env.REPLY_MODE),
     pollTimeoutSeconds: asNumber('POLL_TIMEOUT_SECONDS', 20),
-    pollIntervalMs: asNumber('POLL_INTERVAL_MS', 1200),
+    pollIntervalMs: asNumber('POLL_INTERVAL_MS', 300),
     sessionRetentionDays: asNumber('SESSION_RETENTION_DAYS', 30),
     sessionRetentionMessages: asNumber('SESSION_RETENTION_MESSAGES', 200),
     dbPath: process.env.DB_PATH ?? './data/sessions.sqlite',

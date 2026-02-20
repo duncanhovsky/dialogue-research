@@ -88,6 +88,7 @@ Recommended first step:
 
 - `/start` show welcome message
 - `/menu` refresh interactive main menu
+- `/back` go back to previous step (paper and development flows)
 - `/topic <name>` switch topic thread
 - `/agent <profile>` switch agent profile
 - `/models` list available models
@@ -119,6 +120,24 @@ Development mode commands:
 - `/devrun <command>` run whitelisted command (`git status|branch|log`, `npm/pnpm/yarn test`)
 - `/devgit [status|branch|log]` shortcut for Git query actions
 
+Interactive development flow (inline keyboard):
+
+- Enter `💻 Development Menu` to receive a workspace project list and clone hint
+- Select a project from inline buttons to set focused project
+- After focus is set, use `🤖 Copilot` or `🔁 Change Project`
+- In Vibe Coding panel, use `🧩 Agent` / `🧠 Model` / `🌳 File Tree`
+- You can also send a GitHub repo URL directly in development mode to clone into workspace
+- File tree lines are formatted as `文件夹 <path>` or `#文件N.ext <path>`
+- Reply `文件夹 <path>` (or `文件夹`) to browse, reply `#文件N.ext` to let Copilot read and explain that file
+- File tree supports inline pagination (`上一页/下一页`) for large directories
+- `#文件N.ext` uses stable numbering within the current directory (N remains consistent across pages)
+- Inline callback actions are bound to the originating topic thread (no forced fallback to default topic)
+- Development sub-steps support `⬅️ 返回上一步` via inline keyboard (project list, focused project panel, vibe panel, agent/model picker, file tree)
+- You can also use `/back` as text fallback for previous-step navigation in development flow
+- Paper sub-pages (history/candidates) also use `⬅️ 返回上一步` inline navigation
+- Back-action callback namespace is unified as `back:*` (legacy callbacks remain compatible)
+- Back-action callback literals are centralized in daemon constants for readability and safer refactoring
+
 Language behavior:
 
 - `zh` => bot system messages and model outputs follow Chinese
@@ -136,6 +155,13 @@ Guidance hierarchy:
 1. Send `/start`
 2. Send a normal message and confirm automatic reply
 3. Check [data/copilot-usage.log](data/copilot-usage.log) for usage records
+
+Automated coverage highlights:
+
+- [tests/devModeHelpers.test.ts](tests/devModeHelpers.test.ts) validates menu-topic state key format and stable file indexing across paginated file tree views
+- [tests/devModeHelpers.test.ts](tests/devModeHelpers.test.ts) also validates callback topic resolution (mapped topic, missing mapping fallback, invalid message id fallback)
+- [tests/devModeHelpers.test.ts](tests/devModeHelpers.test.ts) also validates development natural intents (`GitHub URL`, `文件夹`, `#文件N.ext`) parsing
+- [tests/devModeHelpers.test.ts](tests/devModeHelpers.test.ts) also validates file-index cache parsing and stable index to path resolution with malformed-input fallback
 
 ## Troubleshooting
 

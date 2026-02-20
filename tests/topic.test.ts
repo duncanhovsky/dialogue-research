@@ -80,6 +80,11 @@ describe('parseTelegramText', () => {
     expect(result.command).toBe('menu');
   });
 
+  it('parses back command', () => {
+    const result = parseTelegramText('/back', config);
+    expect(result.command).toBe('back');
+  });
+
   it('parses language command', () => {
     const result = parseTelegramText('/language en', config);
     expect(result.command).toBe('language');

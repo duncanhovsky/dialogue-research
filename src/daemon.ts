@@ -10,6 +10,22 @@ import { fetch as undiciFetch } from 'undici';
 import { buildPaperBrainstormInstruction, buildPaperOrganizeInstruction } from './researchModes.js';
 import { DevWorkspaceManager } from './devWorkspace.js';
 import {
+  buildDevFileIndexCache,
+  buildDevTreeEntries,
+  buildGlobalFileIndexMap,
+  DevTreeEntry,
+  isGitHubRepoUrl,
+  makeMenuTopicStateKey,
+  parseDevFileIndexCache,
+  parseDevNaturalIntent,
+  resolveFilePathByStableIndex,
+  resolveCallbackTopic
+} from './devModeHelpers.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import {
   languageLabel,
   parseLanguageInput,
   pickLanguageText,
@@ -19,6 +35,7 @@ import {
 } from './i18n.js';
 
 const copilotLastCallAt = new Map<string, number>();
+const execFileAsync = promisify(execFile);
 const MAIN_MENU_MESSAGE_ID_KEY = 'ui_main_menu_message_id';
 const UI_MODE_KEY = 'ui_mode';
 const PAPER_SEARCH_RESULTS_KEY = 'paper_search_results';
@@ -27,8 +44,51 @@ const PAPER_ORGANIZE_MODE_KEY = 'paper_mode_organize';
 const PAPER_BRAINSTORM_MODE_KEY = 'paper_mode_brainstorm';
 const DEV_WORKSPACE_ROOT_KEY = 'dev_workspace_root';
 const DEV_CURRENT_PROJECT_KEY = 'dev_current_project';
+const DEV_GLOBAL_PROJECT_KEY = 'dev_focused_project_global';
+const DEV_PROJECT_CANDIDATES_KEY = 'dev_project_candidates';
+const DEV_VIBE_MODE_KEY = 'dev_vibe_mode';
+const DEV_SELECTED_AGENT_KEY = 'dev_selected_agent';
+const DEV_FILE_TREE_PATH_KEY = 'dev_file_tree_path';
+const DEV_FILE_TREE_INDEX_KEY = 'dev_file_tree_index';
+const DEV_FILE_TREE_PAGE_KEY = 'dev_file_tree_page';
+const DEV_AGENT_CACHE_KEY = 'dev_agent_cache';
+const DEV_NAV_STEP_KEY = 'dev_nav_step';
+const PAPER_NAV_STEP_KEY = 'paper_nav_step';
+const MENU_TOPIC_BY_MESSAGE_PREFIX = 'ui_menu_topic_by_message_';
+const DEV_NAV_STEP = {
+  PROJECTS: 'projects',
+  FOCUSED: 'focused',
+  VIBE: 'vibe',
+  VIBE_AGENT: 'vibe_agent',
+  VIBE_MODEL: 'vibe_model',
+  VIBE_TREE: 'vibe_tree',
+  CREATE_PROMPT: 'dev_create_prompt',
+  CLONE_PROMPT: 'dev_clone_prompt'
+} as const;
+const PAPER_NAV_STEP = {
+  MENU: 'paper_menu',
+  ACTIVE: 'paper_active',
+  HELP: 'paper_help',
+  ADD_PROMPT: 'paper_add_prompt',
+  HISTORY: 'paper_history',
+  CANDIDATES: 'paper_candidates',
+  ORGANIZE_PROMPT: 'paper_organize_prompt',
+  BRAINSTORM_PROMPT: 'paper_brainstorm_prompt'
+} as const;
+const BACK_CALLBACK = {
+  PAPER: 'back:paper',
+  DEV_PROJECTS: 'back:dev:projects',
+  DEV_FOCUSED: 'back:dev:focused',
+  DEV_VIBE: 'back:dev:vibe'
+} as const;
+const LEGACY_BACK_CALLBACK = {
+  PAPER: 'paper:back',
+  DEV_PROJECTS: 'dev:back:projects',
+  DEV_FOCUSED: 'dev:back:focused',
+  DEV_VIBE: 'dev:back:vibe'
+} as const;
 
-type UiMode = 'home' | 'paper' | 'dev';
+type UiMode = 'home' | 'paper' | 'dev' | 'dev_vibe';
 
 interface ArxivCandidate {
   id: string;
@@ -94,7 +154,6 @@ function buildMainMenuKeyboard(mode: UiMode, language: UiLanguage): InlineKeyboa
         ],
         [{ text: language === 'en' ? '🆘 Paper Help' : '🆘 论文帮助', callback_data: 'paper:help' }],
         [
-          { text: language === 'en' ? '💻 Dev Menu' : '💻 开发菜单', callback_data: 'menu:dev' },
           { text: language === 'en' ? '🏠 Home' : '🏠 主菜单', callback_data: 'menu:home' }
         ]
       ]
@@ -114,7 +173,23 @@ function buildMainMenuKeyboard(mode: UiMode, language: UiLanguage): InlineKeyboa
         ],
         [{ text: language === 'en' ? '🆘 Dev Help' : '🆘 开发帮助', callback_data: 'dev:help' }],
         [
-          { text: language === 'en' ? '📚 Paper Menu' : '📚 论文菜单', callback_data: 'menu:paper' },
+          { text: language === 'en' ? '🏠 Home' : '🏠 主菜单', callback_data: 'menu:home' }
+        ]
+      ]
+    };
+  }
+
+  if (mode === 'dev_vibe') {
+    return {
+      inline_keyboard: [
+        [
+          { text: language === 'en' ? '🧩 Agent' : '🧩 智能体', callback_data: 'vibe:agent' },
+          { text: language === 'en' ? '🧠 Model' : '🧠 模型', callback_data: 'vibe:model' },
+          { text: language === 'en' ? '🌳 File Tree' : '🌳 文件树', callback_data: 'vibe:tree' }
+        ],
+        [{ text: language === 'en' ? '⬅️ Back' : '⬅️ 返回上一步', callback_data: BACK_CALLBACK.DEV_FOCUSED }],
+        [
+          { text: language === 'en' ? '🔁 Change Project' : '🔁 更换项目', callback_data: 'dev:switch' },
           { text: language === 'en' ? '🏠 Home' : '🏠 主菜单', callback_data: 'menu:home' }
         ]
       ]
@@ -146,6 +221,12 @@ function buildMainMenuText(mode: UiMode, language: UiLanguage, detail?: string):
               'Use buttons to view projects, check status, create or clone.',
               'All development actions stay in this inline panel to keep chat clean.'
             ]
+          : mode === 'dev_vibe'
+            ? [
+                '🎛️ Vibe Coding Panel',
+                'Use buttons to switch agent/model, inspect file tree, or change focused project.',
+                'Then chat directly and Copilot will answer with project context.'
+              ]
           : [
               '🤖 Dialogue-Research Main Menu',
               'Choose a mode below:',
@@ -161,6 +242,8 @@ function buildMainMenuText(mode: UiMode, language: UiLanguage, detail?: string):
       ? ['📚 论文菜单', '通过按钮完成添加/切换论文、信息整理与头脑风暴。', '论文相关操作尽量都在此 inline 面板中完成，减少聊天刷屏。']
       : mode === 'dev'
         ? ['💻 开发菜单', '通过按钮查看项目、查看状态、创建或克隆项目。', '开发相关操作尽量都在此 inline 面板中完成，减少聊天刷屏。']
+        : mode === 'dev_vibe'
+          ? ['🎛️ Vibe Coding 面板', '通过按钮切换智能体/模型、查看文件树，或更换专注项目。', '然后直接发送需求，Copilot 会结合项目上下文回复。']
         : ['🤖 对话式科研主菜单', '请选择下方模式：', '📚 论文菜单 | 💻 开发菜单'];
   if (detail) {
     lines.push('', detail);
@@ -169,18 +252,73 @@ function buildMainMenuText(mode: UiMode, language: UiLanguage, detail?: string):
 }
 
 function normalizeUiMode(raw: string | undefined): UiMode {
-  if (raw === 'paper' || raw === 'dev' || raw === 'home') {
+  if (raw === 'paper' || raw === 'dev' || raw === 'home' || raw === 'dev_vibe') {
     return raw;
   }
   return 'home';
+}
+
+function isDevVibeMode(store: SessionStore, chatId: number, topic: string): boolean {
+  return store.getTopicState(chatId, topic, DEV_VIBE_MODE_KEY) === '1';
+}
+
+function setDevVibeMode(store: SessionStore, chatId: number, topic: string, active: boolean): void {
+  store.setTopicState(chatId, topic, DEV_VIBE_MODE_KEY, active ? '1' : '0');
+}
+
+function getSelectedDevAgent(store: SessionStore, config: ReturnType<typeof loadConfig>, chatId: number, topic: string): string {
+  return store.getTopicState(chatId, topic, DEV_SELECTED_AGENT_KEY) ?? config.defaultAgent;
+}
+
+function setSelectedDevAgent(store: SessionStore, chatId: number, topic: string, agent: string): void {
+  store.setTopicState(chatId, topic, DEV_SELECTED_AGENT_KEY, agent);
+}
+
+function getDevNavStep(store: SessionStore, chatId: number, topic: string): string {
+  return store.getTopicState(chatId, topic, DEV_NAV_STEP_KEY) ?? '';
+}
+
+function setDevNavStep(store: SessionStore, chatId: number, topic: string, step: string): void {
+  store.setTopicState(chatId, topic, DEV_NAV_STEP_KEY, step);
+}
+
+function getPaperNavStep(store: SessionStore, chatId: number, topic: string): string {
+  return store.getTopicState(chatId, topic, PAPER_NAV_STEP_KEY) ?? '';
+}
+
+function setPaperNavStep(store: SessionStore, chatId: number, topic: string, step: string): void {
+  store.setTopicState(chatId, topic, PAPER_NAV_STEP_KEY, step);
+}
+
+function isBackCallback(data: string, key: keyof typeof BACK_CALLBACK): boolean {
+  return data === BACK_CALLBACK[key] || data === LEGACY_BACK_CALLBACK[key];
 }
 
 function getDevWorkspaceRoot(store: SessionStore, config: ReturnType<typeof loadConfig>, chatId: number, topic: string): string {
   return store.getTopicState(chatId, topic, DEV_WORKSPACE_ROOT_KEY) ?? config.devWorkspaceRoot;
 }
 
-function getDevCurrentProject(store: SessionStore, chatId: number, topic: string): string | undefined {
-  return store.getTopicState(chatId, topic, DEV_CURRENT_PROJECT_KEY);
+function getDevCurrentProject(
+  store: SessionStore,
+  config: ReturnType<typeof loadConfig>,
+  chatId: number,
+  topic: string
+): string | undefined {
+  return store.getTopicState(chatId, topic, DEV_CURRENT_PROJECT_KEY) ?? store.getTopicState(chatId, config.defaultTopic, DEV_GLOBAL_PROJECT_KEY);
+}
+
+function setDevCurrentProject(
+  store: SessionStore,
+  config: ReturnType<typeof loadConfig>,
+  chatId: number,
+  topic: string,
+  projectName: string,
+  syncGlobal = true
+): void {
+  store.setTopicState(chatId, topic, DEV_CURRENT_PROJECT_KEY, projectName);
+  if (syncGlobal) {
+    store.setTopicState(chatId, config.defaultTopic, DEV_GLOBAL_PROJECT_KEY, projectName);
+  }
 }
 
 function getUiLanguage(store: SessionStore, chatId: number, topic: string): UiLanguage {
@@ -198,7 +336,7 @@ function getCurrentProjectPath(
   chatId: number,
   topic: string
 ): { name: string; path: string } {
-  const current = getDevCurrentProject(store, chatId, topic);
+  const current = getDevCurrentProject(store, config, chatId, topic);
   if (!current) {
     throw new Error('当前未选择项目，请先执行 /devselect <项目名>。');
   }
@@ -270,7 +408,7 @@ async function downloadArxivPdf(id: string): Promise<Buffer> {
   return Buffer.from(bytes);
 }
 
-function saveCandidates(store: SessionStore, chatId: number, topic: string, key: string, list: PaperRecord[] | ArxivCandidate[]): void {
+function saveCandidates<T>(store: SessionStore, chatId: number, topic: string, key: string, list: T[]): void {
   store.setTopicState(chatId, topic, key, JSON.stringify(list));
 }
 
@@ -353,7 +491,7 @@ function buildArxivPickKeyboard(candidates: ArxivCandidate[], language: UiLangua
   if (navRow.length > 0) {
     rows.push(navRow);
   }
-  rows.push([{ text: language === 'en' ? '↩️ Back to Paper' : '↩️ 返回论文菜单', callback_data: 'menu:paper' }]);
+  rows.push([{ text: language === 'en' ? '⬅️ Back' : '⬅️ 返回上一步', callback_data: BACK_CALLBACK.PAPER }]);
   return { inline_keyboard: rows };
 }
 
@@ -366,7 +504,7 @@ function buildRecentPaperKeyboard(records: PaperRecord[], language: UiLanguage, 
   if (navRow.length > 0) {
     rows.push(navRow);
   }
-  rows.push([{ text: language === 'en' ? '↩️ Back to Paper' : '↩️ 返回论文菜单', callback_data: 'menu:paper' }]);
+  rows.push([{ text: language === 'en' ? '⬅️ Back' : '⬅️ 返回上一步', callback_data: BACK_CALLBACK.PAPER }]);
   return { inline_keyboard: rows };
 }
 
@@ -377,6 +515,133 @@ function buildDevProjectsKeyboard(language: UiLanguage, page: number, totalPages
     baseRows.unshift(navRow);
   }
   return { inline_keyboard: baseRows };
+}
+
+function buildDevFocusedKeyboard(language: UiLanguage): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: language === 'en' ? '🤖 Copilot' : '🤖 Copilot', callback_data: 'dev:copilot' },
+        { text: language === 'en' ? '🔁 Change Project' : '🔁 更换项目', callback_data: 'dev:switch' }
+      ],
+      [{ text: language === 'en' ? '⬅️ Back' : '⬅️ 返回上一步', callback_data: BACK_CALLBACK.DEV_PROJECTS }],
+      [{ text: language === 'en' ? '🏠 Home' : '🏠 主菜单', callback_data: 'menu:home' }]
+    ]
+  };
+}
+
+function buildStepBackKeyboard(language: UiLanguage, backCallbackData: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: language === 'en' ? '⬅️ Back' : '⬅️ 返回上一步', callback_data: backCallbackData }],
+      [{ text: language === 'en' ? '🏠 Home' : '🏠 主菜单', callback_data: 'menu:home' }]
+    ]
+  };
+}
+
+function buildAgentPickKeyboard(language: UiLanguage, agents: string[]): InlineKeyboardMarkup {
+  const rows = agents.map((agent, index) => [
+    { text: `${index + 1}. ${agent}`, callback_data: `vibe:agent:pick:${index}` }
+  ]);
+  rows.push([{ text: language === 'en' ? '⬅️ Back' : '⬅️ 返回上一步', callback_data: BACK_CALLBACK.DEV_VIBE }]);
+  return { inline_keyboard: rows };
+}
+
+function buildModelPickKeyboard(language: UiLanguage, catalog: ModelCatalog): InlineKeyboardMarkup {
+  const rows = catalog.list().slice(0, 30).map((model, index) => [
+    { text: `${index + 1}. ${model.id}`, callback_data: `vibe:model:pick:${model.id}` }
+  ]);
+  rows.push([{ text: language === 'en' ? '⬅️ Back' : '⬅️ 返回上一步', callback_data: BACK_CALLBACK.DEV_VIBE }]);
+  return { inline_keyboard: rows };
+}
+
+function buildFileTreeKeyboard(language: UiLanguage, page: number, totalPages: number): InlineKeyboardMarkup {
+  const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+  const nav = buildPaginationNavRow(language, page, totalPages, 'vibe:tree:page:', 'vibe:tree:page:');
+  if (nav.length > 0) {
+    rows.push(nav);
+  }
+  rows.push([{ text: language === 'en' ? '⬅️ Back' : '⬅️ 返回上一步', callback_data: BACK_CALLBACK.DEV_VIBE }]);
+  return { inline_keyboard: rows };
+}
+
+async function discoverAvailableAgents(config: ReturnType<typeof loadConfig>): Promise<string[]> {
+  const result = new Set<string>([config.defaultAgent]);
+  const configured = (process.env.COPILOT_AGENT_LIST ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  configured.forEach((item) => result.add(item));
+
+  const discoveryCmd = (process.env.COPILOT_AGENT_DISCOVERY_CMD ?? '').trim();
+  if (discoveryCmd) {
+    try {
+      const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', discoveryCmd], {
+        windowsHide: true,
+        maxBuffer: 1024 * 1024
+      });
+      stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith('#'))
+        .forEach((line) => result.add(line));
+    } catch {
+      // fallback to local config only
+    }
+  }
+
+  const agentConfigCandidates = [
+    path.resolve('config/agents.json'),
+    path.resolve('config/agents.example.json')
+  ];
+  for (const filePath of agentConfigCandidates) {
+    if (!fs.existsSync(filePath)) {
+      continue;
+    }
+    try {
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      Object.keys(parsed).forEach((key) => {
+        if (key.trim()) {
+          result.add(key.trim());
+        }
+      });
+      break;
+    } catch {
+      // ignore malformed config
+    }
+  }
+
+  return [...result].sort((a, b) => a.localeCompare(b));
+}
+
+function formatDevTreeMessage(language: UiLanguage, projectName: string, dirPath: string, entries: DevTreeEntry[]): string {
+  const lines = entries.map((entry) => {
+    if (entry.isDirectory) {
+      return `${language === 'en' ? 'Folder' : '文件夹'} ${entry.relativePath}`;
+    }
+    return `#${language === 'en' ? 'file' : '文件'}${entry.index}.${entry.ext} ${entry.relativePath}`;
+  });
+
+  return pickLanguageText(
+    language,
+    [
+      `当前项目：${projectName}`,
+      `目录：${dirPath}`,
+      '文件树：',
+      ...lines,
+      '回复“文件夹 路径”查看目录；回复“#文件N.ext”查看并解释文件。',
+      '#文件N.ext 的 N 在当前目录中是全局稳定编号（跨页不变）。'
+    ].join('\n'),
+    [
+      `Current project: ${projectName}`,
+      `Directory: ${dirPath}`,
+      'File tree:',
+      ...lines,
+      'Reply with "Folder <path>" to browse; reply with "#fileN.ext" to inspect and explain.',
+      'The N in #fileN.ext is globally stable in current directory (unchanged across pages).'
+    ].join('\n')
+  );
 }
 
 async function ingestPaperFromArxiv(
@@ -408,9 +673,61 @@ async function ingestPaperFromArxiv(
   return record;
 }
 
+async function tryHandleArxivDirectInput(
+  telegram: TelegramClient,
+  store: SessionStore,
+  papers: PaperManager,
+  chatId: number,
+  topic: string,
+  agent: string,
+  text: string
+): Promise<boolean> {
+  const arxivId = parseArxivId(text);
+  if (!arxivId) {
+    return false;
+  }
+
+  await sendChunks(
+    telegram,
+    chatId,
+    localize(
+      store,
+      chatId,
+      topic,
+      `检测到 arXiv 链接/编号，正在调用本地论文导入流程：${arxivId}`,
+      `Detected arXiv link/id, importing via local paper workflow: ${arxivId}`
+    )
+  );
+
+  try {
+    const record = await ingestPaperFromArxiv(papers, store, chatId, topic, agent, arxivId);
+    await sendChunks(
+      telegram,
+      chatId,
+      localize(
+        store,
+        chatId,
+        topic,
+        [`论文已入库：${record.title}`, `分类：${record.category}`, `摘要：${record.summary.slice(0, 1000)}`, '可继续提问：/ask 你的问题'].join('\n'),
+        [`Paper ingested: ${record.title}`, `Category: ${record.category}`, `Summary: ${record.summary.slice(0, 1000)}`, 'Continue with: /ask <your question>'].join('\n')
+      )
+    );
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : String(error);
+    await sendChunks(
+      telegram,
+      chatId,
+      localize(store, chatId, topic, `arXiv 论文导入失败：${messageText}`, `arXiv import failed: ${messageText}`)
+    );
+  }
+
+  return true;
+}
+
 async function upsertMainMenu(
   telegram: TelegramClient,
   store: SessionStore,
+  config: ReturnType<typeof loadConfig>,
   chatId: number,
   topic: string,
   mode: UiMode,
@@ -427,6 +744,7 @@ async function upsertMainMenu(
     try {
       const messageId = await telegram.editMessageText(chatId, existingMessageId, text, keyboard);
       store.setTopicState(chatId, topic, MAIN_MENU_MESSAGE_ID_KEY, String(messageId));
+      store.setTopicState(chatId, config.defaultTopic, makeMenuTopicStateKey(messageId, MENU_TOPIC_BY_MESSAGE_PREFIX), topic);
       store.setTopicState(chatId, topic, UI_MODE_KEY, mode);
       return messageId;
     } catch (error) {
@@ -437,6 +755,7 @@ async function upsertMainMenu(
         if (forceResurface) {
           const newMessageId = await telegram.sendMessage(chatId, text, keyboard);
           store.setTopicState(chatId, topic, MAIN_MENU_MESSAGE_ID_KEY, String(newMessageId));
+          store.setTopicState(chatId, config.defaultTopic, makeMenuTopicStateKey(newMessageId, MENU_TOPIC_BY_MESSAGE_PREFIX), topic);
           store.setTopicState(chatId, topic, UI_MODE_KEY, mode);
           return newMessageId;
         }
@@ -448,6 +767,7 @@ async function upsertMainMenu(
 
   const messageId = await telegram.sendMessage(chatId, text, keyboard);
   store.setTopicState(chatId, topic, MAIN_MENU_MESSAGE_ID_KEY, String(messageId));
+  store.setTopicState(chatId, config.defaultTopic, makeMenuTopicStateKey(messageId, MENU_TOPIC_BY_MESSAGE_PREFIX), topic);
   store.setTopicState(chatId, topic, UI_MODE_KEY, mode);
   return messageId;
 }
@@ -524,6 +844,212 @@ async function refreshModelCatalogAtStartup(catalog: ModelCatalog, copilot: Copi
   }
 }
 
+async function sendDevFileTree(
+  telegram: TelegramClient,
+  store: SessionStore,
+  config: ReturnType<typeof loadConfig>,
+  chatId: number,
+  topic: string,
+  relativePath = '.',
+  page = 0
+): Promise<void> {
+  const language = getUiLanguage(store, chatId, topic);
+  const project = getCurrentProjectPath(store, config, chatId, topic);
+  const files = devWorkspace.listProjectFiles(project.path, relativePath);
+  const globalFileIndexMap = buildGlobalFileIndexMap(files);
+  const pagination = paginateItems(files, page, 30);
+  const entries = buildDevTreeEntries(pagination.pageItems, globalFileIndexMap);
+  const fileIndexMap = buildDevFileIndexCache(files, globalFileIndexMap);
+
+  store.setTopicState(chatId, topic, DEV_FILE_TREE_PATH_KEY, relativePath);
+  store.setTopicState(chatId, topic, DEV_FILE_TREE_PAGE_KEY, String(pagination.page));
+  store.setTopicState(chatId, topic, DEV_FILE_TREE_INDEX_KEY, JSON.stringify(fileIndexMap));
+
+  if (entries.length === 0) {
+    await sendChunks(
+      telegram,
+      chatId,
+      pickLanguageText(language, `当前目录为空：${relativePath}`, `Directory is empty: ${relativePath}`)
+    );
+    return;
+  }
+
+  const message = `${formatDevTreeMessage(language, project.name, relativePath, entries)}\n\n${pickLanguageText(language, `第 ${pagination.page + 1}/${pagination.totalPages} 页`, `Page ${pagination.page + 1}/${pagination.totalPages}`)}`;
+  await telegram.sendMessage(chatId, message, buildFileTreeKeyboard(language, pagination.page, pagination.totalPages));
+}
+
+async function explainProjectFile(
+  telegram: TelegramClient,
+  store: SessionStore,
+  config: ReturnType<typeof loadConfig>,
+  catalog: ModelCatalog,
+  copilot: CopilotClient,
+  chatId: number,
+  topic: string,
+  relativePath: string,
+  userPrompt?: string
+): Promise<void> {
+  const language = getUiLanguage(store, chatId, topic);
+  const project = getCurrentProjectPath(store, config, chatId, topic);
+  const content = devWorkspace.readProjectFile(project.path, relativePath, 260);
+
+  if (!copilot.isEnabled()) {
+    await sendChunks(
+      telegram,
+      chatId,
+      pickLanguageText(
+        language,
+        [`当前项目：${project.name}`, `文件：${relativePath}`, '', content].join('\n'),
+        [`Current project: ${project.name}`, `File: ${relativePath}`, '', content].join('\n')
+      )
+    );
+    return;
+  }
+
+  const selectedModel = store.getSelectedModel(chatId, topic);
+  const modelId = catalog.findById(selectedModel)?.id ?? config.defaultModel;
+  if (modelId !== selectedModel) {
+    store.setSelectedModel(chatId, topic, modelId);
+  }
+  const agent = getSelectedDevAgent(store, config, chatId, topic);
+  const continuation = store.continueContext(chatId, topic, 20);
+
+  await enforceCopilotRateLimit(chatId, topic);
+  const reply = await copilot.generateReply({
+    modelId,
+    topic,
+    agent,
+    userInput: withLanguageInstruction(
+      language,
+      userPrompt ?? pickLanguageText(language, `请阅读并解释文件 ${relativePath} 的作用、关键结构与注意点。`, `Explain file ${relativePath}: purpose, key structure, and caveats.`)
+    ),
+    contextSummary: continuation.summary,
+    extraContext: [`Project: ${project.name}`, `Path: ${relativePath}`, 'File content:', content].join('\n\n')
+  });
+
+  store.append({
+    chatId,
+    topic,
+    role: 'assistant',
+    agent,
+    content: `[dev-file-explain] ${relativePath} => ${reply.slice(0, 3000)}`
+  });
+
+  await sendChunks(telegram, chatId, reply);
+}
+
+async function tryHandleDevNaturalInput(
+  telegram: TelegramClient,
+  store: SessionStore,
+  catalog: ModelCatalog,
+  copilot: CopilotClient,
+  config: ReturnType<typeof loadConfig>,
+  chatId: number,
+  topic: string,
+  text: string
+): Promise<boolean> {
+  const trimmed = text.trim();
+  const language = getUiLanguage(store, chatId, topic);
+  const currentMode = normalizeUiMode(store.getTopicState(chatId, topic, UI_MODE_KEY));
+  const naturalIntent = parseDevNaturalIntent(trimmed);
+
+  if ((currentMode === 'dev' || currentMode === 'dev_vibe') && naturalIntent.kind === 'github-url') {
+    try {
+      const root = getDevWorkspaceRoot(store, config, chatId, topic);
+      await sendChunks(
+        telegram,
+        chatId,
+        pickLanguageText(language, `正在克隆仓库：${naturalIntent.repoUrl}`, `Cloning repository: ${naturalIntent.repoUrl}`)
+      );
+      const project = await devWorkspace.cloneProject(root, naturalIntent.repoUrl);
+      setDevCurrentProject(store, config, chatId, topic, project.name, true);
+      await telegram.sendMessage(
+        chatId,
+        pickLanguageText(
+          language,
+          `仓库克隆成功，已设为专注项目：${project.name}\n点击“Copilot”开始 Vibe Coding，或“更换项目”切换。`,
+          `Repository cloned and focused: ${project.name}\nTap Copilot to start vibe coding, or Change Project.`
+        ),
+        buildDevFocusedKeyboard(language)
+      );
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      await sendChunks(telegram, chatId, pickLanguageText(language, `克隆失败：${messageText}`, `Clone failed: ${messageText}`));
+    }
+    return true;
+  }
+
+  if (!isDevVibeMode(store, chatId, topic)) {
+    return false;
+  }
+
+  if (naturalIntent.kind === 'folder') {
+    const target = naturalIntent.targetPath || store.getTopicState(chatId, topic, DEV_FILE_TREE_PATH_KEY) || '.';
+    const page = Number(store.getTopicState(chatId, topic, DEV_FILE_TREE_PAGE_KEY) ?? '0');
+    try {
+      await sendDevFileTree(telegram, store, config, chatId, topic, target, Number.isFinite(page) ? Math.max(0, page) : 0);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      await sendChunks(telegram, chatId, pickLanguageText(language, `读取文件夹失败：${messageText}`, `Failed to open folder: ${messageText}`));
+    }
+    return true;
+  }
+
+  if (naturalIntent.kind === 'file-index') {
+    const index = naturalIntent.index;
+    const rawMap = store.getTopicState(chatId, topic, DEV_FILE_TREE_INDEX_KEY);
+    const mapping = parseDevFileIndexCache(rawMap);
+    const filePath = resolveFilePathByStableIndex(mapping, index);
+    if (!filePath) {
+      await sendChunks(telegram, chatId, pickLanguageText(language, '索引无效，请先点“文件树”刷新列表。', 'Invalid index. Open File Tree first to refresh indexes.'));
+      return true;
+    }
+
+    try {
+      await explainProjectFile(telegram, store, config, catalog, copilot, chatId, topic, filePath);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      await sendChunks(telegram, chatId, pickLanguageText(language, `文件解释失败：${messageText}`, `File explanation failed: ${messageText}`));
+    }
+    return true;
+  }
+
+  try {
+    const project = getCurrentProjectPath(store, config, chatId, topic);
+    const selectedModel = store.getSelectedModel(chatId, topic);
+    const modelId = catalog.findById(selectedModel)?.id ?? config.defaultModel;
+    if (modelId !== selectedModel) {
+      store.setSelectedModel(chatId, topic, modelId);
+    }
+    const agent = getSelectedDevAgent(store, config, chatId, topic);
+    const continuation = store.continueContext(chatId, topic, 20);
+    const treeSnapshot = devWorkspace
+      .listProjectFiles(project.path, '.')
+      .slice(0, 40)
+      .map((item) => `${item.isDirectory ? '[dir]' : '[file]'} ${item.relativePath}`)
+      .join('\n');
+
+    store.append({ chatId, topic, role: 'user', agent, content: trimmed });
+    await enforceCopilotRateLimit(chatId, topic);
+    const reply = await copilot.generateReply({
+      modelId,
+      topic,
+      agent,
+      userInput: withLanguageInstruction(language, trimmed),
+      contextSummary: continuation.summary,
+      extraContext: [`Focused project: ${project.name}`, 'Project structure snapshot:', treeSnapshot].join('\n\n')
+    });
+
+    store.append({ chatId, topic, role: 'assistant', agent, content: reply.slice(0, 3000) });
+    await sendChunks(telegram, chatId, reply);
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : String(error);
+    await sendChunks(telegram, chatId, pickLanguageText(language, `Vibe Coding 回复失败：${messageText}`, `Vibe coding reply failed: ${messageText}`));
+  }
+
+  return true;
+}
+
 async function handleMessage(
   telegram: TelegramClient,
   store: SessionStore,
@@ -598,15 +1124,167 @@ async function handleMessage(
   }
 
   if (parsed.command === 'start') {
-    const currentMode = normalizeUiMode(store.getTopicState(chatId, parsed.topic, UI_MODE_KEY));
     await sendChunks(telegram, chatId, parsed.text);
-    await upsertMainMenu(telegram, store, chatId, parsed.topic, currentMode, undefined, true);
+    await upsertMainMenu(telegram, store, config, chatId, parsed.topic, 'home', undefined, true);
     return;
   }
 
   if (parsed.command === 'menu') {
     const currentMode = normalizeUiMode(store.getTopicState(chatId, parsed.topic, UI_MODE_KEY));
-    await upsertMainMenu(telegram, store, chatId, parsed.topic, currentMode, undefined, true);
+    await upsertMainMenu(telegram, store, config, chatId, parsed.topic, currentMode, undefined, true);
+    return;
+  }
+
+  if (parsed.command === 'back') {
+    const language = getUiLanguage(store, chatId, parsed.topic);
+    const currentMode = normalizeUiMode(store.getTopicState(chatId, parsed.topic, UI_MODE_KEY));
+    const navStep = getDevNavStep(store, chatId, parsed.topic);
+    const paperNavStep = getPaperNavStep(store, chatId, parsed.topic);
+    const focused = getDevCurrentProject(store, config, chatId, parsed.topic);
+
+    const renderPaperMenuByText = async (): Promise<void> => {
+      await upsertMainMenu(telegram, store, config, chatId, parsed.topic, 'paper', undefined, true);
+      setPaperNavStep(store, chatId, parsed.topic, PAPER_NAV_STEP.MENU);
+    };
+
+    const isPaperStep = currentMode === 'paper';
+    if (isPaperStep) {
+      if (paperNavStep && paperNavStep !== PAPER_NAV_STEP.MENU) {
+        await renderPaperMenuByText();
+        return;
+      }
+      await upsertMainMenu(telegram, store, config, chatId, parsed.topic, 'home', undefined, true);
+      return;
+    }
+
+    const renderFocusedByText = async (): Promise<void> => {
+      if (!focused) {
+        await upsertMainMenu(telegram, store, config, chatId, parsed.topic, 'dev', undefined, true);
+        return;
+      }
+      await telegram.sendMessage(
+        chatId,
+        pickLanguageText(
+          language,
+          `已设置专注项目：${focused}\n点击“Copilot”开始 Vibe Coding，或“更换项目”返回项目列表。`,
+          `Focused project set: ${focused}\nTap Copilot to start vibe coding, or Change Project to go back.`
+        ),
+        buildDevFocusedKeyboard(language)
+      );
+      store.setTopicState(chatId, parsed.topic, UI_MODE_KEY, 'dev');
+      setDevVibeMode(store, chatId, parsed.topic, false);
+      setDevNavStep(store, chatId, parsed.topic, DEV_NAV_STEP.FOCUSED);
+    };
+
+    const renderProjectsByText = async (): Promise<void> => {
+      const root = getDevWorkspaceRoot(store, config, chatId, parsed.topic);
+      const projects = devWorkspace.listProjects(root);
+      saveCandidates(store, chatId, parsed.topic, DEV_PROJECT_CANDIDATES_KEY, projects.map((item) => ({ name: item.name })));
+
+      if (projects.length === 0) {
+        await telegram.sendMessage(
+          chatId,
+          pickLanguageText(
+            language,
+            `欢迎进入开发模式。\n工作空间：${root}\n当前还没有项目。\n你可以发送 GitHub 仓库链接，我会在工作空间自动克隆。`,
+            `Welcome to development mode.\nWorkspace: ${root}\nNo projects yet.\nSend a GitHub repo URL and I will clone it into workspace.`
+          ),
+          buildMainMenuKeyboard('dev', language)
+        );
+        store.setTopicState(chatId, parsed.topic, UI_MODE_KEY, 'dev');
+        setDevVibeMode(store, chatId, parsed.topic, false);
+        setDevNavStep(store, chatId, parsed.topic, DEV_NAV_STEP.PROJECTS);
+        return;
+      }
+
+      const pagination = paginateItems(projects, 0, DEV_PROJECT_PAGE_SIZE);
+      const lines = pagination.pageItems.map((item, index) => {
+        const absolute = pagination.startIndex + index;
+        const tag = focused === item.name ? (language === 'en' ? ' [focused]' : ' [当前专注]') : '';
+        return `${absolute + 1}. ${item.name}${item.isGitRepo ? ' (git)' : ''}${tag}`;
+      });
+      const projectRows = pagination.pageItems.map((item, index) => [
+        {
+          text: `${pagination.startIndex + index + 1}. ${item.name}`,
+          callback_data: `dev:pick:${pagination.startIndex + index}`
+        }
+      ]);
+      const navRow = buildPaginationNavRow(language, pagination.page, pagination.totalPages, 'dev:projects:page:', 'dev:projects:page:');
+      if (navRow.length > 0) {
+        projectRows.push(navRow);
+      }
+      projectRows.push([{ text: language === 'en' ? '📥 Clone by URL' : '📥 通过链接克隆', callback_data: 'dev:clone' }]);
+      if (focused) {
+        projectRows.push([
+          { text: language === 'en' ? '🤖 Copilot' : '🤖 Copilot', callback_data: 'dev:copilot' },
+          { text: language === 'en' ? '🔁 Change Project' : '🔁 更换项目', callback_data: 'dev:switch' }
+        ]);
+        projectRows.push([{ text: language === 'en' ? '⬅️ Back' : '⬅️ 返回上一步', callback_data: BACK_CALLBACK.DEV_FOCUSED }]);
+      }
+      projectRows.push([{ text: language === 'en' ? '🏠 Home' : '🏠 主菜单', callback_data: 'menu:home' }]);
+
+      await telegram.sendMessage(
+        chatId,
+        pickLanguageText(
+          language,
+          ['欢迎进入开发模式（项目管理器）', `工作空间：${root}`, '项目列表：', ...lines, '可发送 GitHub 仓库链接直接克隆。'].join('\n'),
+          ['Welcome to development mode (project manager)', `Workspace: ${root}`, 'Projects:', ...lines, 'You can send a GitHub URL to clone directly.'].join('\n')
+        ),
+        { inline_keyboard: projectRows }
+      );
+      store.setTopicState(chatId, parsed.topic, UI_MODE_KEY, 'dev');
+      setDevVibeMode(store, chatId, parsed.topic, false);
+      setDevNavStep(store, chatId, parsed.topic, DEV_NAV_STEP.PROJECTS);
+    };
+
+    const renderVibeByText = async (): Promise<void> => {
+      if (!focused) {
+        await renderProjectsByText();
+        return;
+      }
+      const selectedAgent = getSelectedDevAgent(store, config, chatId, parsed.topic);
+      const selectedModel = store.getSelectedModel(chatId, parsed.topic);
+      await telegram.sendMessage(
+        chatId,
+        pickLanguageText(
+          language,
+          [`当前专注项目：${focused}`, `智能体：${selectedAgent}`, `模型：${selectedModel}`, '你现在可以直接发送需求，进入 Vibe Coding。'].join('\n'),
+          [`Focused project: ${focused}`, `Agent: ${selectedAgent}`, `Model: ${selectedModel}`, 'You can now chat directly for vibe coding.'].join('\n')
+        ),
+        buildMainMenuKeyboard('dev_vibe', language)
+      );
+      store.setTopicState(chatId, parsed.topic, UI_MODE_KEY, 'dev_vibe');
+      setDevVibeMode(store, chatId, parsed.topic, true);
+      setDevNavStep(store, chatId, parsed.topic, DEV_NAV_STEP.VIBE);
+    };
+
+    const effectiveStep = navStep || currentMode;
+    if (effectiveStep === DEV_NAV_STEP.VIBE_AGENT || effectiveStep === DEV_NAV_STEP.VIBE_MODEL || effectiveStep === DEV_NAV_STEP.VIBE_TREE) {
+      await renderVibeByText();
+      return;
+    }
+    if (effectiveStep === DEV_NAV_STEP.VIBE || currentMode === 'dev_vibe') {
+      await renderFocusedByText();
+      return;
+    }
+    if (effectiveStep === DEV_NAV_STEP.FOCUSED) {
+      await renderProjectsByText();
+      return;
+    }
+    if (effectiveStep === DEV_NAV_STEP.CREATE_PROMPT || effectiveStep === DEV_NAV_STEP.CLONE_PROMPT) {
+      await renderProjectsByText();
+      return;
+    }
+    if (effectiveStep === DEV_NAV_STEP.PROJECTS || currentMode === 'dev') {
+      if (focused) {
+        await renderFocusedByText();
+      } else {
+        await upsertMainMenu(telegram, store, config, chatId, parsed.topic, 'home', undefined, true);
+      }
+      return;
+    }
+
+    await upsertMainMenu(telegram, store, config, chatId, parsed.topic, 'home', undefined, true);
     return;
   }
 
@@ -704,6 +1382,7 @@ async function handleMessage(
   }
 
   if (parsed.command === 'paper') {
+    store.setTopicState(chatId, parsed.topic, UI_MODE_KEY, 'paper');
     const paperPath = store.getTopicState(chatId, parsed.topic, 'active_paper_path');
     const paper = paperPath ? papers.getPaperByPath(paperPath) : null;
     if (!paper) {
@@ -712,6 +1391,7 @@ async function handleMessage(
         chatId,
         localize(store, chatId, parsed.topic, '当前话题还没有激活论文。请先发送 PDF 文件。', 'No active paper in this topic. Please send a PDF first.')
       );
+      setPaperNavStep(store, chatId, parsed.topic, PAPER_NAV_STEP.MENU);
       return;
     }
 
@@ -738,10 +1418,12 @@ async function handleMessage(
         ].join('\n')
       )
     );
+    setPaperNavStep(store, chatId, parsed.topic, PAPER_NAV_STEP.ACTIVE);
     return;
   }
 
   if (parsed.command === 'paperhelp') {
+    store.setTopicState(chatId, parsed.topic, UI_MODE_KEY, 'paper');
     await sendChunks(
       telegram,
       chatId,
@@ -756,7 +1438,8 @@ async function handleMessage(
           '- 论文整理：/paperorganize [cot|tot|got]',
           '- 论文讨论：/paperbrainstorm [--mode cot|tot|got] <问题>',
           '- 模式设置：/papermode <organize|brainstorm> <cot|tot|got>',
-          '- 问答：/ask <问题> 或 /askm <model-id> <问题>'
+          '- 问答：/ask <问题> 或 /askm <model-id> <问题>',
+          '- 返回上一步：/back 或 inline 按钮'
         ].join('\n'),
         [
           '📚 Paper Mode Guide',
@@ -765,10 +1448,12 @@ async function handleMessage(
           '- Paper organizing: /paperorganize [cot|tot|got]',
           '- Paper discussion: /paperbrainstorm [--mode cot|tot|got] <question>',
           '- Mode config: /papermode <organize|brainstorm> <cot|tot|got>',
-          '- QA: /ask <question> or /askm <model-id> <question>'
+          '- QA: /ask <question> or /askm <model-id> <question>',
+          '- Go back: /back or inline back button'
         ].join('\n')
       )
     );
+    setPaperNavStep(store, chatId, parsed.topic, PAPER_NAV_STEP.HELP);
     return;
   }
 
@@ -833,6 +1518,8 @@ async function handleMessage(
           [`Workspace: ${root}`, 'Projects:', ...lines, 'Use /devselect <project-name> to switch current project.'].join('\n')
         )
       );
+      setDevNavStep(store, chatId, parsed.topic, DEV_NAV_STEP.PROJECTS);
+      store.setTopicState(chatId, parsed.topic, UI_MODE_KEY, 'dev');
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       await sendChunks(
@@ -854,7 +1541,7 @@ async function handleMessage(
     try {
       const root = getDevWorkspaceRoot(store, config, chatId, parsed.topic);
       const project = devWorkspace.createProject(root, projectName);
-      store.setTopicState(chatId, parsed.topic, DEV_CURRENT_PROJECT_KEY, project.name);
+      setDevCurrentProject(store, config, chatId, parsed.topic, project.name, true);
       await sendChunks(
         telegram,
         chatId,
@@ -866,6 +1553,8 @@ async function handleMessage(
           `Project created and selected: ${project.name}\nPath: ${project.path}`
         )
       );
+      setDevNavStep(store, chatId, parsed.topic, DEV_NAV_STEP.FOCUSED);
+      store.setTopicState(chatId, parsed.topic, UI_MODE_KEY, 'dev');
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       await sendChunks(
@@ -887,7 +1576,7 @@ async function handleMessage(
     try {
       const root = getDevWorkspaceRoot(store, config, chatId, parsed.topic);
       const resolvedPath = devWorkspace.resolveProjectPath(root, projectName);
-      store.setTopicState(chatId, parsed.topic, DEV_CURRENT_PROJECT_KEY, projectName);
+      setDevCurrentProject(store, config, chatId, parsed.topic, projectName, true);
       await sendChunks(
         telegram,
         chatId,
@@ -899,6 +1588,8 @@ async function handleMessage(
           `Current project switched to: ${projectName}\nPath: ${resolvedPath}`
         )
       );
+      setDevNavStep(store, chatId, parsed.topic, DEV_NAV_STEP.FOCUSED);
+      store.setTopicState(chatId, parsed.topic, UI_MODE_KEY, 'dev');
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       await sendChunks(
@@ -929,7 +1620,7 @@ async function handleMessage(
         localize(store, chatId, parsed.topic, `正在克隆仓库：${repoUrl}`, `Cloning repository: ${repoUrl}`)
       );
       const project = await devWorkspace.cloneProject(root, repoUrl, parsed.cloneName);
-      store.setTopicState(chatId, parsed.topic, DEV_CURRENT_PROJECT_KEY, project.name);
+      setDevCurrentProject(store, config, chatId, parsed.topic, project.name, true);
       await sendChunks(
         telegram,
         chatId,
@@ -941,6 +1632,8 @@ async function handleMessage(
           `Repository cloned and selected: ${project.name}\nPath: ${project.path}`
         )
       );
+      setDevNavStep(store, chatId, parsed.topic, DEV_NAV_STEP.FOCUSED);
+      store.setTopicState(chatId, parsed.topic, UI_MODE_KEY, 'dev');
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       await sendChunks(
@@ -954,7 +1647,7 @@ async function handleMessage(
 
   if (parsed.command === 'devstatus') {
     const root = getDevWorkspaceRoot(store, config, chatId, parsed.topic);
-    const current = getDevCurrentProject(store, chatId, parsed.topic) ?? '未设置';
+    const current = getDevCurrentProject(store, config, chatId, parsed.topic) ?? '未设置';
     await sendChunks(telegram, chatId, localize(
       store,
       chatId,
@@ -991,7 +1684,8 @@ async function handleMessage(
           '- 项目管理：/devprojects /devcreate /devselect /devclone /devstatus',
           '- 项目浏览：/devls [目录] /devcat <文件路径>',
           '- 命令执行：/devrun <命令>（白名单）',
-          '- Git 快捷：/devgit [status|branch|log]'
+          '- Git 快捷：/devgit [status|branch|log]',
+          '- 返回上一步：/back 或 inline 按钮“⬅️ 返回上一步”'
         ].join('\n'),
         [
           '💻 Development Mode Guide',
@@ -999,7 +1693,8 @@ async function handleMessage(
           '- Project management: /devprojects /devcreate /devselect /devclone /devstatus',
           '- Project browsing: /devls [dir] /devcat <file-path>',
           '- Command execution: /devrun <command> (whitelist only)',
-          '- Git shortcut: /devgit [status|branch|log]'
+          '- Git shortcut: /devgit [status|branch|log]',
+          '- Go back: /back or inline button "⬅️ Back"'
         ].join('\n')
       )
     );
@@ -1147,6 +1842,7 @@ async function handleMessage(
   }
 
   if (parsed.command === 'paperorganize') {
+    store.setTopicState(chatId, parsed.topic, UI_MODE_KEY, 'paper');
     const paperPath = store.getTopicState(chatId, parsed.topic, 'active_paper_path');
     const paper = paperPath ? papers.getPaperByPath(paperPath) : null;
     if (!paper) {
@@ -1155,6 +1851,7 @@ async function handleMessage(
         chatId,
         localize(store, chatId, parsed.topic, '当前没有可整理的论文，请先发送 PDF 或 /paperadd。', 'No paper available for organization. Send a PDF or use /paperadd first.')
       );
+      setPaperNavStep(store, chatId, parsed.topic, PAPER_NAV_STEP.MENU);
       return;
     }
 
@@ -1214,6 +1911,7 @@ async function handleMessage(
         content: `[paper-organize:${mode}] ${answer.slice(0, 3000)}`
       });
       await sendChunks(telegram, chatId, answer);
+      setPaperNavStep(store, chatId, parsed.topic, PAPER_NAV_STEP.ORGANIZE_PROMPT);
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       await sendChunks(telegram, chatId, localize(store, chatId, parsed.topic, `论文信息整理失败：${messageText}`, `Paper organization failed: ${messageText}`));
@@ -1223,6 +1921,7 @@ async function handleMessage(
   }
 
   if (parsed.command === 'paperbrainstorm') {
+    store.setTopicState(chatId, parsed.topic, UI_MODE_KEY, 'paper');
     const paperPath = store.getTopicState(chatId, parsed.topic, 'active_paper_path');
     const paper = paperPath ? papers.getPaperByPath(paperPath) : null;
     if (!paper) {
@@ -1231,6 +1930,7 @@ async function handleMessage(
         chatId,
         localize(store, chatId, parsed.topic, '当前没有可讨论的论文，请先发送 PDF 或 /paperadd。', 'No paper available for brainstorming. Send a PDF or use /paperadd first.')
       );
+      setPaperNavStep(store, chatId, parsed.topic, PAPER_NAV_STEP.MENU);
       return;
     }
 
@@ -1304,6 +2004,7 @@ async function handleMessage(
         content: `[paper-brainstorm:${mode}] ${question} => ${answer.slice(0, 3000)}`
       });
       await sendChunks(telegram, chatId, answer);
+      setPaperNavStep(store, chatId, parsed.topic, PAPER_NAV_STEP.BRAINSTORM_PROMPT);
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       await sendChunks(telegram, chatId, localize(store, chatId, parsed.topic, `论文头脑风暴失败：${messageText}`, `Paper brainstorming failed: ${messageText}`));
@@ -1312,6 +2013,7 @@ async function handleMessage(
   }
 
   if (parsed.command === 'paperlist') {
+    store.setTopicState(chatId, parsed.topic, UI_MODE_KEY, 'paper');
     const recent = papers.listRecent(chatId, parsed.topic, 30);
     if (recent.length === 0) {
       await sendChunks(
@@ -1325,6 +2027,7 @@ async function handleMessage(
           'No historical papers in this topic. Send a PDF first or use /paperadd <arXiv link/title>.'
         )
       );
+      setPaperNavStep(store, chatId, parsed.topic, PAPER_NAV_STEP.MENU);
       return;
     }
 
@@ -1342,10 +2045,12 @@ async function handleMessage(
       ),
       buildRecentPaperKeyboard(recent, getUiLanguage(store, chatId, parsed.topic), pagination.page, PAPER_LIST_PAGE_SIZE)
     );
+    setPaperNavStep(store, chatId, parsed.topic, PAPER_NAV_STEP.HISTORY);
     return;
   }
 
   if (parsed.command === 'paperadd') {
+    store.setTopicState(chatId, parsed.topic, UI_MODE_KEY, 'paper');
     const input = (parsed.paperInput ?? '').trim();
     if (!input) {
       await sendChunks(
@@ -1382,6 +2087,7 @@ async function handleMessage(
             [`Paper ingested: ${record.title}`, `Category: ${record.category}`, `Summary: ${record.summary.slice(0, 1000)}`, 'Continue with: /ask <your question>'].join('\n')
           )
         );
+        setPaperNavStep(store, chatId, parsed.topic, PAPER_NAV_STEP.ACTIVE);
       } catch (error) {
         const messageText = error instanceof Error ? error.message : String(error);
         await sendChunks(telegram, chatId, localize(store, chatId, parsed.topic, `arXiv 论文导入失败：${messageText}`, `arXiv import failed: ${messageText}`));
@@ -1404,6 +2110,7 @@ async function handleMessage(
             'No candidate papers found. Try a more specific title query.'
           )
         );
+        setPaperNavStep(store, chatId, parsed.topic, PAPER_NAV_STEP.ADD_PROMPT);
         return;
       }
 
@@ -1414,6 +2121,7 @@ async function handleMessage(
         localize(store, chatId, parsed.topic, `检索到以下候选（点击按钮导入）：\n${lines}`, `Candidates found (click to import):\n${lines}`),
         buildArxivPickKeyboard(candidates, getUiLanguage(store, chatId, parsed.topic))
       );
+      setPaperNavStep(store, chatId, parsed.topic, PAPER_NAV_STEP.CANDIDATES);
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       await sendChunks(telegram, chatId, localize(store, chatId, parsed.topic, `arXiv 检索失败：${messageText}`, `arXiv search failed: ${messageText}`));
@@ -1547,6 +2255,18 @@ async function handleMessage(
     return;
   }
 
+  if (!parsed.command) {
+    const consumed = await tryHandleArxivDirectInput(telegram, store, papers, chatId, parsed.topic, parsed.agent, parsed.text);
+    if (consumed) {
+      return;
+    }
+
+    const devConsumed = await tryHandleDevNaturalInput(telegram, store, catalog, copilot, config, chatId, parsed.topic, parsed.text);
+    if (devConsumed) {
+      return;
+    }
+  }
+
   if (parsed.command === 'history') {
     const records = parsed.keyword
       ? store.search({ chatId, keyword: parsed.keyword, limit: 8 })
@@ -1648,6 +2368,8 @@ async function handleMessage(
 async function handleCallbackQuery(
   telegram: TelegramClient,
   store: SessionStore,
+  catalog: ModelCatalog,
+  copilot: CopilotClient,
   papers: PaperManager,
   callbackQuery: NonNullable<TelegramUpdate['callback_query']>,
   config: ReturnType<typeof loadConfig>
@@ -1658,10 +2380,15 @@ async function handleCallbackQuery(
     return;
   }
 
-  const topic = config.defaultTopic;
   const data = (callbackQuery.data ?? '').trim();
-  const language = getUiLanguage(store, chatId, topic);
   const callbackMessageId = callbackQuery.message?.message_id;
+  const topic = resolveCallbackTopic({
+    callbackMessageId,
+    defaultTopic: config.defaultTopic,
+    keyPrefix: MENU_TOPIC_BY_MESSAGE_PREFIX,
+    readState: (key) => store.getTopicState(chatId, config.defaultTopic, key)
+  });
+  const language = getUiLanguage(store, chatId, topic);
 
   const renderPanel = async (mode: UiMode, detail?: string, customKeyboard?: InlineKeyboardMarkup): Promise<void> => {
     const text = buildMainMenuText(mode, language, detail);
@@ -1672,28 +2399,307 @@ async function handleCallbackQuery(
         const messageId = await telegram.editMessageText(chatId, callbackMessageId, text, keyboard);
         store.setTopicState(chatId, topic, MAIN_MENU_MESSAGE_ID_KEY, String(messageId));
         store.setTopicState(chatId, topic, UI_MODE_KEY, mode);
+        setDevVibeMode(store, chatId, topic, mode === 'dev_vibe');
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (/message is not modified/i.test(message)) {
           store.setTopicState(chatId, topic, UI_MODE_KEY, mode);
+          setDevVibeMode(store, chatId, topic, mode === 'dev_vibe');
           return;
         }
       }
     }
 
-    await upsertMainMenu(telegram, store, chatId, topic, mode, detail);
+    await upsertMainMenu(telegram, store, config, chatId, topic, mode, detail);
+    setDevVibeMode(store, chatId, topic, mode === 'dev_vibe');
+  };
+
+  const renderDevFocusedPanel = async (projectNameOverride?: string): Promise<void> => {
+    const focused = projectNameOverride ?? getDevCurrentProject(store, config, chatId, topic);
+    if (!focused) {
+      await renderDevProjectPanel(0);
+      return;
+    }
+
+    await renderPanel(
+      'dev',
+      pickLanguageText(
+        language,
+        `已设置专注项目：${focused}\n点击“Copilot”开始 Vibe Coding，或“更换项目”返回项目列表。`,
+        `Focused project set: ${focused}\nTap Copilot to start vibe coding, or Change Project to go back.`
+      ),
+      buildDevFocusedKeyboard(language)
+    );
+    setDevNavStep(store, chatId, topic, DEV_NAV_STEP.FOCUSED);
+  };
+
+  const renderDevProjectPanel = async (requestedPage = 0): Promise<void> => {
+    const root = getDevWorkspaceRoot(store, config, chatId, topic);
+    const projects = devWorkspace.listProjects(root);
+    const focused = getDevCurrentProject(store, config, chatId, topic);
+    saveCandidates(store, chatId, topic, DEV_PROJECT_CANDIDATES_KEY, projects.map((item) => ({ name: item.name })));
+
+    if (projects.length === 0) {
+      await renderPanel(
+        'dev',
+        pickLanguageText(
+          language,
+          `欢迎进入开发模式。\n工作空间：${root}\n当前还没有项目。\n你可以发送 GitHub 仓库链接，我会在工作空间自动克隆。`,
+          `Welcome to development mode.\nWorkspace: ${root}\nNo projects yet.\nSend a GitHub repo URL and I will clone it into workspace.`
+        )
+      );
+      return;
+    }
+
+    const pagination = paginateItems(projects, requestedPage, DEV_PROJECT_PAGE_SIZE);
+    const lines = pagination.pageItems.map((item, index) => {
+      const absolute = pagination.startIndex + index;
+      const tag = focused === item.name ? (language === 'en' ? ' [focused]' : ' [当前专注]') : '';
+      return `${absolute + 1}. ${item.name}${item.isGitRepo ? ' (git)' : ''}${tag}`;
+    });
+
+    const projectRows = pagination.pageItems.map((item, index) => [
+      {
+        text: `${pagination.startIndex + index + 1}. ${item.name}`,
+        callback_data: `dev:pick:${pagination.startIndex + index}`
+      }
+    ]);
+    const navRow = buildPaginationNavRow(language, pagination.page, pagination.totalPages, 'dev:projects:page:', 'dev:projects:page:');
+    if (navRow.length > 0) {
+      projectRows.push(navRow);
+    }
+    projectRows.push([{ text: language === 'en' ? '📥 Clone by URL' : '📥 通过链接克隆', callback_data: 'dev:clone' }]);
+    if (focused) {
+      projectRows.push([
+        { text: language === 'en' ? '🤖 Copilot' : '🤖 Copilot', callback_data: 'dev:copilot' },
+        { text: language === 'en' ? '🔁 Change Project' : '🔁 更换项目', callback_data: 'dev:switch' }
+      ]);
+      projectRows.push([{ text: language === 'en' ? '⬅️ Back' : '⬅️ 返回上一步', callback_data: BACK_CALLBACK.DEV_FOCUSED }]);
+    }
+    projectRows.push([{ text: language === 'en' ? '🏠 Home' : '🏠 主菜单', callback_data: 'menu:home' }]);
+
+    await renderPanel(
+      'dev',
+      pickLanguageText(
+        language,
+        [
+          '欢迎进入开发模式（项目管理器）',
+          `工作空间：${root}`,
+          '项目列表：',
+          ...lines,
+          '可发送 GitHub 仓库链接直接克隆。'
+        ].join('\n'),
+        [
+          'Welcome to development mode (project manager)',
+          `Workspace: ${root}`,
+          'Projects:',
+          ...lines,
+          'You can send a GitHub URL to clone directly.'
+        ].join('\n')
+      ),
+      { inline_keyboard: projectRows }
+    );
+    setDevNavStep(store, chatId, topic, DEV_NAV_STEP.PROJECTS);
+  };
+
+  const renderVibePanel = async (): Promise<void> => {
+    const focused = getDevCurrentProject(store, config, chatId, topic);
+    if (!focused) {
+      await renderDevProjectPanel(0);
+      return;
+    }
+
+    const selectedAgent = getSelectedDevAgent(store, config, chatId, topic);
+    const selectedModel = store.getSelectedModel(chatId, topic);
+    await renderPanel(
+      'dev_vibe',
+      pickLanguageText(
+        language,
+        [`当前专注项目：${focused}`, `智能体：${selectedAgent}`, `模型：${selectedModel}`, '你现在可以直接发送需求，进入 Vibe Coding。'].join('\n'),
+        [`Focused project: ${focused}`, `Agent: ${selectedAgent}`, `Model: ${selectedModel}`, 'You can now chat directly for vibe coding.'].join('\n')
+      ),
+      buildMainMenuKeyboard('dev_vibe', language)
+    );
+    setDevNavStep(store, chatId, topic, DEV_NAV_STEP.VIBE);
   };
 
   if (data === 'menu:paper') {
     await renderPanel('paper');
+    setPaperNavStep(store, chatId, topic, PAPER_NAV_STEP.MENU);
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已切换到论文模式', 'Switched to paper mode'));
     return;
   }
 
+  if (isBackCallback(data, 'PAPER')) {
+    await renderPanel('paper');
+    setPaperNavStep(store, chatId, topic, PAPER_NAV_STEP.MENU);
+    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已返回上一步', 'Back to previous step'));
+    return;
+  }
+
   if (data === 'menu:dev') {
-    await renderPanel('dev');
+    await renderDevProjectPanel(0);
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已切换到开发模式', 'Switched to development mode'));
+    return;
+  }
+
+  if (data === 'dev:switch') {
+    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '请选择项目', 'Select a project'));
+    await renderDevProjectPanel(0);
+    return;
+  }
+
+  if (isBackCallback(data, 'DEV_PROJECTS')) {
+    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已返回项目列表', 'Back to project list'));
+    await renderDevProjectPanel(0);
+    return;
+  }
+
+  if (isBackCallback(data, 'DEV_FOCUSED')) {
+    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已返回上一步', 'Back to previous step'));
+    await renderDevFocusedPanel();
+    return;
+  }
+
+  if (isBackCallback(data, 'DEV_VIBE')) {
+    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已返回上一步', 'Back to previous step'));
+    await renderVibePanel();
+    return;
+  }
+
+  if (data.startsWith('dev:pick:')) {
+    const index = Number(data.split(':')[2]);
+    const candidates = readCandidates<{ name: string }>(store, chatId, topic, DEV_PROJECT_CANDIDATES_KEY);
+    const selected = Number.isFinite(index) ? candidates[index] : undefined;
+    if (!selected?.name) {
+      await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '项目列表已失效，请刷新', 'Project list expired, please refresh'));
+      await renderDevProjectPanel(0);
+      return;
+    }
+
+    try {
+      const root = getDevWorkspaceRoot(store, config, chatId, topic);
+      devWorkspace.resolveProjectPath(root, selected.name);
+      setDevCurrentProject(store, config, chatId, topic, selected.name, true);
+      await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, `已选择 ${selected.name}`, `Selected ${selected.name}`));
+      await renderDevFocusedPanel(selected.name);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '项目不可用', 'Project unavailable'));
+      await renderPanel('dev', pickLanguageText(language, `设置项目失败：${messageText}`, `Failed to set project: ${messageText}`));
+    }
+    return;
+  }
+
+  if (data === 'dev:copilot') {
+    const focused = getDevCurrentProject(store, config, chatId, topic);
+    if (!focused) {
+      await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '请先选择项目', 'Select a project first'));
+      await renderDevProjectPanel(0);
+      return;
+    }
+
+    const agents = await discoverAvailableAgents(config);
+    store.setTopicState(chatId, topic, DEV_AGENT_CACHE_KEY, JSON.stringify(agents));
+    const preferredModel = 'gpt-5.3-codex';
+    if (catalog.findById(preferredModel)) {
+      store.setSelectedModel(chatId, topic, preferredModel);
+    } else if (!catalog.findById(store.getSelectedModel(chatId, topic))) {
+      store.setSelectedModel(chatId, topic, config.defaultModel);
+    }
+
+    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已进入 Copilot 模式', 'Entered Copilot mode'));
+    await renderVibePanel();
+    return;
+  }
+
+  if (data === 'vibe:agent') {
+    const freshAgents = await discoverAvailableAgents(config);
+    store.setTopicState(chatId, topic, DEV_AGENT_CACHE_KEY, JSON.stringify(freshAgents));
+    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '请选择智能体', 'Choose an agent'));
+    await renderPanel(
+      'dev_vibe',
+      pickLanguageText(language, '请选择用于 Vibe Coding 的智能体：', 'Pick an agent for vibe coding:'),
+      buildAgentPickKeyboard(language, freshAgents)
+    );
+    setDevNavStep(store, chatId, topic, DEV_NAV_STEP.VIBE_AGENT);
+    return;
+  }
+
+  if (data.startsWith('vibe:agent:pick:')) {
+    const index = Number(data.split(':')[3]);
+    const raw = store.getTopicState(chatId, topic, DEV_AGENT_CACHE_KEY) ?? '[]';
+    const agents = (() => {
+      try {
+        const parsed = JSON.parse(raw) as string[];
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [] as string[];
+      }
+    })();
+    const selected = Number.isFinite(index) ? agents[index] : undefined;
+    if (!selected) {
+      await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '智能体列表已过期', 'Agent list expired'));
+      await renderVibePanel();
+      return;
+    }
+
+    setSelectedDevAgent(store, chatId, topic, selected);
+    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, `已切换智能体 ${selected}`, `Agent switched to ${selected}`));
+    await renderVibePanel();
+    return;
+  }
+
+  if (data === 'vibe:model') {
+    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '请选择模型', 'Choose a model'));
+    await renderPanel(
+      'dev_vibe',
+      pickLanguageText(language, '请选择用于 Vibe Coding 的模型：', 'Pick a model for vibe coding:'),
+      buildModelPickKeyboard(language, catalog)
+    );
+    setDevNavStep(store, chatId, topic, DEV_NAV_STEP.VIBE_MODEL);
+    return;
+  }
+
+  if (data.startsWith('vibe:model:pick:')) {
+    const modelId = data.slice('vibe:model:pick:'.length).trim();
+    if (!catalog.findById(modelId)) {
+      await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '模型不可用', 'Model unavailable'));
+      await renderVibePanel();
+      return;
+    }
+    store.setSelectedModel(chatId, topic, modelId);
+    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, `已切换模型 ${modelId}`, `Model switched to ${modelId}`));
+    await renderVibePanel();
+    return;
+  }
+
+  if (data === 'vibe:tree') {
+    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '正在加载文件树', 'Loading file tree'));
+    try {
+      await sendDevFileTree(telegram, store, config, chatId, topic, '.', 0);
+      await renderVibePanel();
+      setDevNavStep(store, chatId, topic, DEV_NAV_STEP.VIBE_TREE);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      await renderPanel('dev_vibe', pickLanguageText(language, `文件树加载失败：${messageText}`, `File tree failed: ${messageText}`));
+    }
+    return;
+  }
+
+  if (data.startsWith('vibe:tree:page:')) {
+    const requestedPage = parsePageFromCallback(data, 'vibe:tree:page:');
+    const currentPath = store.getTopicState(chatId, topic, DEV_FILE_TREE_PATH_KEY) ?? '.';
+    await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '正在翻页', 'Paging'));
+    try {
+      await sendDevFileTree(telegram, store, config, chatId, topic, currentPath, requestedPage);
+      await renderVibePanel();
+      setDevNavStep(store, chatId, topic, DEV_NAV_STEP.VIBE_TREE);
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      await renderPanel('dev_vibe', pickLanguageText(language, `文件树翻页失败：${messageText}`, `File tree paging failed: ${messageText}`));
+    }
     return;
   }
 
@@ -1713,6 +2719,7 @@ async function handleCallbackQuery(
         ['Three ways to add a paper:', '1) Upload a PDF directly', '2) /paperadd <arXiv link or id>', '3) /paperadd <paper title keywords> (returns candidate buttons)'].join('\n')
       )
     );
+    setPaperNavStep(store, chatId, topic, PAPER_NAV_STEP.ADD_PROMPT);
     return;
   }
 
@@ -1722,10 +2729,11 @@ async function handleCallbackQuery(
       'paper',
       pickLanguageText(
         language,
-        ['论文常用命令：', '- /paper', '- /paperorganize', '- /paperbrainstorm <问题>', '- /papermode organize|brainstorm cot|tot|got', '- /paperadd <arXiv链接|编号|标题关键词>'].join('\n'),
-        ['Paper commands:', '- /paper', '- /paperorganize', '- /paperbrainstorm <question>', '- /papermode organize|brainstorm cot|tot|got', '- /paperadd <arXiv link|id|title keywords>'].join('\n')
+        ['论文常用命令：', '- /paper', '- /paperorganize', '- /paperbrainstorm <问题>', '- /papermode organize|brainstorm cot|tot|got', '- /paperadd <arXiv链接|编号|标题关键词>', '- /back'].join('\n'),
+        ['Paper commands:', '- /paper', '- /paperorganize', '- /paperbrainstorm <question>', '- /papermode organize|brainstorm cot|tot|got', '- /paperadd <arXiv link|id|title keywords>', '- /back'].join('\n')
       )
     );
+    setPaperNavStep(store, chatId, topic, PAPER_NAV_STEP.HELP);
     return;
   }
 
@@ -1756,6 +2764,7 @@ async function handleCallbackQuery(
       ),
       buildRecentPaperKeyboard(recent, language, pagination.page, PAPER_LIST_PAGE_SIZE)
     );
+    setPaperNavStep(store, chatId, topic, PAPER_NAV_STEP.HISTORY);
     return;
   }
 
@@ -1780,6 +2789,7 @@ async function handleCallbackQuery(
       ),
       buildArxivPickKeyboard(candidates, language, pagination.page, 5)
     );
+    setPaperNavStep(store, chatId, topic, PAPER_NAV_STEP.CANDIDATES);
     return;
   }
 
@@ -1804,6 +2814,7 @@ async function handleCallbackQuery(
           [`Paper ingested: ${record.title}`, `Category: ${record.category}`, `Summary: ${record.summary.slice(0, 1000)}`, 'Continue with: /ask <your question>'].join('\n')
         )
       );
+      setPaperNavStep(store, chatId, topic, PAPER_NAV_STEP.ACTIVE);
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       await renderPanel('paper', pickLanguageText(language, `导入候选论文失败：${messageText}`, `Candidate import failed: ${messageText}`));
@@ -1826,6 +2837,7 @@ async function handleCallbackQuery(
       'paper',
       pickLanguageText(language, `已切换当前论文：${selected.title}\n可继续使用 /paper 或 /ask 提问。`, `Current paper switched: ${selected.title}\nContinue with /paper or /ask.`)
     );
+    setPaperNavStep(store, chatId, topic, PAPER_NAV_STEP.ACTIVE);
     return;
   }
 
@@ -1840,44 +2852,21 @@ async function handleCallbackQuery(
         [`Send: /paperbrainstorm <your question>`, `Current brainstorm mode: ${currentMode}`, 'Change mode: /papermode brainstorm cot|tot|got'].join('\n')
       )
     );
+    setPaperNavStep(store, chatId, topic, PAPER_NAV_STEP.BRAINSTORM_PROMPT);
     return;
   }
 
   if (data === 'dev:projects' || data.startsWith('dev:projects:page:')) {
     const requestedPage = data.startsWith('dev:projects:page:') ? parsePageFromCallback(data, 'dev:projects:page:') : 0;
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '正在读取项目列表', 'Loading projects'));
-    const root = getDevWorkspaceRoot(store, config, chatId, topic);
-    const projects = devWorkspace.listProjects(root);
-    if (projects.length === 0) {
-      await renderPanel(
-        'dev',
-        pickLanguageText(
-          language,
-          `当前没有项目。\n工作空间：${root}\n可用 /devcreate <项目名> 或 /devclone <仓库URL>。`,
-          `No projects found.\nWorkspace: ${root}\nUse /devcreate <project-name> or /devclone <repo-url>.`
-        )
-      );
-      return;
-    }
-
-    const pagination = paginateItems(projects, requestedPage, DEV_PROJECT_PAGE_SIZE);
-    const lines = pagination.pageItems.map((item, index) => `${pagination.startIndex + index + 1}. ${item.name}${item.isGitRepo ? ' (git)' : ''}`);
-    await renderPanel(
-      'dev',
-      pickLanguageText(
-        language,
-        [`工作空间：${root}`, `项目列表（第 ${pagination.page + 1}/${pagination.totalPages} 页）：`, ...lines, '使用 /devselect <项目名> 选择当前项目。'].join('\n'),
-        [`Workspace: ${root}`, `Projects (page ${pagination.page + 1}/${pagination.totalPages}):`, ...lines, 'Use /devselect <project-name> to select current project.'].join('\n')
-      ),
-      buildDevProjectsKeyboard(language, pagination.page, pagination.totalPages)
-    );
+    await renderDevProjectPanel(requestedPage);
     return;
   }
 
   if (data === 'dev:status') {
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '已加载开发状态', 'Development status loaded'));
     const root = getDevWorkspaceRoot(store, config, chatId, topic);
-    const current = getDevCurrentProject(store, chatId, topic) ?? pickLanguageText(language, '未设置', 'Not set');
+    const current = getDevCurrentProject(store, config, chatId, topic) ?? pickLanguageText(language, '未设置', 'Not set');
     await renderPanel(
       'dev',
       pickLanguageText(language, ['开发模式状态：', `- 工作空间：${root}`, `- 当前项目：${current}`].join('\n'), ['Development mode status:', `- Workspace: ${root}`, `- Current project: ${current}`].join('\n'))
@@ -1887,13 +2876,23 @@ async function handleCallbackQuery(
 
   if (data === 'dev:create') {
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '请输入项目名', 'Please enter project name'));
-    await renderPanel('dev', pickLanguageText(language, '请发送：/devcreate <项目名>', 'Send: /devcreate <project-name>'));
+    await renderPanel(
+      'dev',
+      pickLanguageText(language, '请发送：/devcreate <项目名>', 'Send: /devcreate <project-name>'),
+      buildStepBackKeyboard(language, BACK_CALLBACK.DEV_PROJECTS)
+    );
+    setDevNavStep(store, chatId, topic, DEV_NAV_STEP.CREATE_PROMPT);
     return;
   }
 
   if (data === 'dev:clone') {
     await telegram.answerCallbackQuery(callbackQuery.id, pickLanguageText(language, '请输入仓库地址', 'Please enter repository URL'));
-    await renderPanel('dev', pickLanguageText(language, '请发送：/devclone <仓库URL> [项目名]', 'Send: /devclone <repo-url> [project-name]'));
+    await renderPanel(
+      'dev',
+      pickLanguageText(language, '请发送：/devclone <仓库URL> [项目名]', 'Send: /devclone <repo-url> [project-name]'),
+      buildStepBackKeyboard(language, BACK_CALLBACK.DEV_PROJECTS)
+    );
+    setDevNavStep(store, chatId, topic, DEV_NAV_STEP.CLONE_PROMPT);
     return;
   }
 
@@ -1903,8 +2902,8 @@ async function handleCallbackQuery(
       'dev',
       pickLanguageText(
         language,
-        ['开发常用命令：', '- /devworkspace <目录>', '- /devls', '- /devselect <项目名>', '- /devcat <相对路径>', '- /devrun <命令>', '- /devgit <args>'].join('\n'),
-        ['Development commands:', '- /devworkspace <path>', '- /devls', '- /devselect <project-name>', '- /devcat <relative-path>', '- /devrun <command>', '- /devgit <args>'].join('\n')
+        ['开发常用命令：', '- /devworkspace <目录>', '- /devls', '- /devselect <项目名>', '- /devcat <相对路径>', '- /devrun <命令>', '- /devgit <args>', '- /back'].join('\n'),
+        ['Development commands:', '- /devworkspace <path>', '- /devls', '- /devselect <project-name>', '- /devcat <relative-path>', '- /devrun <command>', '- /devgit <args>', '- /back'].join('\n')
       )
     );
     return;
@@ -1921,6 +2920,7 @@ async function handleCallbackQuery(
         [`Send: /paperorganize`, `Current organize mode: ${currentMode}`, 'Change mode: /papermode organize cot|tot|got'].join('\n')
       )
     );
+    setPaperNavStep(store, chatId, topic, PAPER_NAV_STEP.ORGANIZE_PROMPT);
     return;
   }
 
@@ -2032,7 +3032,7 @@ async function main(): Promise<void> {
       for (const update of updates) {
         const callbackQuery = update.callback_query;
         if (callbackQuery?.id) {
-          await handleCallbackQuery(telegram, store, papers, callbackQuery, config);
+          await handleCallbackQuery(telegram, store, catalog, copilot, papers, callbackQuery, config);
           offset = Math.max(offset, update.update_id + 1);
           continue;
         }
